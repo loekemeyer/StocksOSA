@@ -6,6 +6,9 @@
   'use strict';
 
   var KEY = 'stockrotativo.v1';
+  // Versión del catálogo/seed precargado. Al subirla, el seed nuevo se aplica
+  // solo en navegadores que todavía NO cargaron datos reales (meta.datosReales).
+  var SEED_VERSION = 3;
 
   /* ---------- Estado base ---------- */
   function blank() {
@@ -399,6 +402,7 @@
     st.meta.cliente = 'Osa Distribuidora SRL';
     st.meta.moneda = 'ARS';
     st.meta.periodoMeses = 17;
+    st.meta.seedVersion = SEED_VERSION;
     var meses = st.meta.periodoMeses || 17;
     CATALOGO.forEach(function (row) {
       var codigo = row[0], nombre = row[1], total = row[2];
@@ -460,6 +464,14 @@
 
   // Inicializa el estado (luego de definir catálogo, ventas y seed)
   var state = load();
+  // Migración por versión de seed: si el catálogo precargado cambió y este
+  // navegador todavía no tiene datos reales, se aplica el seed nuevo solo.
+  // Una vez cargado el stock inicial real (meta.datosReales = true) no se toca.
+  (function ensureSeed() {
+    if (state.meta.seedVersion === SEED_VERSION) return;
+    if (!state.meta.datosReales) { state = seedReal(); save(); }
+    else { state.meta.seedVersion = SEED_VERSION; save(); }
+  })();
 
   /* ---------- API pública ---------- */
   window.Store = {

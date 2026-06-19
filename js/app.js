@@ -620,6 +620,7 @@
       var a = S.getArticulo(id);
       if (a && (a.stockInicial || 0) !== val) { S.updateArticulo(id, { stockInicial: val }); n++; }
     });
+    S.setMeta({ datosReales: true }); // protege estos datos de futuras recargas de catálogo
     toast(n ? 'Stock inicial guardado (' + n + ' artículos)' : 'No hubo cambios', n ? 'ok' : 'info');
     render();
   }
