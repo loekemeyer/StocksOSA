@@ -15,6 +15,7 @@
 
   var VIEWS = {
     panel: { title: 'Panel', sub: 'Resumen general de tu stock rotativo' },
+    compras: { title: 'Compra por quincena', sub: 'Promedio que te compra el cliente, de mayor a menor' },
     articulos: { title: 'Artículos', sub: 'Catálogo de productos en consignación' },
     ventas: { title: 'Cargar ventas', sub: 'Informe quincenal de ventas del cliente' },
     entregas: { title: 'Cargar entregas', sub: 'Mercadería que entregaste al cliente' },
@@ -36,6 +37,7 @@
       .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
   }
   function fmtInt(n) { return new Intl.NumberFormat('es-AR').format(Math.round(n || 0)); }
+  function fmtDec(n) { return new Intl.NumberFormat('es-AR', { maximumFractionDigits: 1 }).format(n || 0); }
   function fmtMoney(n) {
     var m = S.getMeta().moneda || 'ARS';
     try { return new Intl.NumberFormat('es-AR', { style: 'currency', currency: m, maximumFractionDigits: 0 }).format(n || 0); }
@@ -127,7 +129,7 @@
     $('#topbarActions').innerHTML = actions;
 
     var fn = ({
-      panel: renderPanel, articulos: renderArticulos, ventas: renderVentas,
+      panel: renderPanel, compras: renderCompras, articulos: renderArticulos, ventas: renderVentas,
       entregas: renderEntregas, pedido: renderPedido, movimientos: renderMovimientos, config: renderConfig
     })[ui.view];
     viewEl.innerHTML = fn ? fn() : '';
@@ -291,11 +293,20 @@
   }
   function articleCard(a, stock) {
     var e = S.estado(a, stock);
-    var pct = a.stockMaximo > 0 ? Math.min(100, Math.max(0, (stock / a.stockMaximo) * 100)) : 0;
+    var isConfig = e === 'config';
+    var pct = (!isConfig && a.stockMaximo > 0) ? Math.min(100, Math.max(0, (stock / a.stockMaximo) * 100)) : 0;
     var fill = e === 'sin' ? 'fill-danger' : (e === 'bajo' ? 'fill-warn' : 'fill-ok');
-    var flag = e === 'sin' ? '<span class="article-card__flag flag-danger">Sin stock</span>'
-      : (e === 'bajo' ? '<span class="article-card__flag flag-warn">Reponer</span>'
-        : '<span class="article-card__flag flag-ok">En nivel</span>');
+    var flag = isConfig ? '<span class="article-card__flag" style="background:rgba(107,115,144,.92);color:#fff;">A configurar</span>'
+      : (e === 'sin' ? '<span class="article-card__flag flag-danger">Sin stock</span>'
+        : (e === 'bajo' ? '<span class="article-card__flag flag-warn">Reponer</span>'
+          : '<span class="article-card__flag flag-ok">En nivel</span>'));
+    var stockLine = isConfig
+      ? '<div class="stock-row"><span class="now" style="color:var(--muted-2);">—</span>' +
+        '<span class="max">≈ ' + fmtDec(S.promedioQuincena(a)) + ' u./quincena</span></div>' +
+        '<div class="bar"><div class="bar__fill" style="width:0%"></div></div>'
+      : '<div class="stock-row"><span class="now">' + fmtInt(stock) + ' <span class="max">u.</span></span>' +
+        '<span class="max">máx ' + fmtInt(a.stockMaximo) + ' · pto ' + fmtInt(a.puntoPedido) + '</span></div>' +
+        '<div class="bar"><div class="bar__fill ' + fill + '" style="width:' + pct + '%"></div></div>';
     return '<div class="article-card">' +
       '<div class="article-card__media">' + flag +
       '<img src="' + fotoDe(a) + '" alt="' + esc(a.nombre) + '" loading="lazy"></div>' +
@@ -303,9 +314,7 @@
       (a.codigo ? '<div class="article-card__code">' + esc(a.codigo) + '</div>' : '') +
       '<div class="article-card__name">' + esc(a.nombre) + '</div>' +
       (a.descripcion ? '<div class="article-card__desc">' + esc(a.descripcion) + '</div>' : '') +
-      '<div class="stock-row"><span class="now">' + fmtInt(stock) + ' <span class="max">u.</span></span>' +
-      '<span class="max">máx ' + fmtInt(a.stockMaximo) + ' · pto ' + fmtInt(a.puntoPedido) + '</span></div>' +
-      '<div class="bar"><div class="bar__fill ' + fill + '" style="width:' + pct + '%"></div></div>' +
+      stockLine +
       '<div class="article-card__foot">' +
       '<button class="btn btn--ghost btn--sm" data-edit="' + a.id + '">Editar</button>' +
       '<button class="btn btn--ghost btn--sm" data-ver="' + a.id + '">Detalle</button>' +
@@ -316,6 +325,60 @@
     if (inp) inp.addEventListener('input', function () { ui.busqueda = inp.value; var pos = inp.selectionStart; render(); var ni = $('#buscar'); if (ni) { ni.focus(); ni.setSelectionRange(pos, pos); } });
     $$('[data-chip]').forEach(function (c) { c.addEventListener('click', function () { ui.filtro = c.getAttribute('data-chip'); render(); }); });
     $$('[data-edit]').forEach(function (b) { b.addEventListener('click', function () { openArticuloForm(b.getAttribute('data-edit')); }); });
+    $$('[data-ver]').forEach(function (b) { b.addEventListener('click', function () { openArticuloDetalle(b.getAttribute('data-ver')); }); });
+  };
+
+  /* ============================================================
+     COMPRA POR QUINCENA (ranking)
+     ============================================================ */
+  var comprasBusqueda = '';
+  function renderCompras() {
+    var rank = S.rankingCompras();
+    if (!rank.length) return emptyApp();
+    var meta = S.getMeta();
+    var q = S.quincenasPeriodo();
+    var totalGen = rank.reduce(function (a, x) { return a + x.total; }, 0);
+    var maxProm = rank[0].promQuincena || 1;
+    var qq = comprasBusqueda.toLowerCase();
+    var filt = rank.filter(function (x) {
+      return !qq || (x.articulo.nombre + ' ' + x.articulo.codigo).toLowerCase().indexOf(qq) >= 0;
+    });
+
+    var html = '<div class="callout"><svg viewBox="0 0 24 24"><path d="M12 2a10 10 0 1 0 0 20 10 10 0 0 0 0-20zm1 15h-2v-6h2v6zm0-8h-2V7h2v2z"/></svg>' +
+      '<div>Promedio calculado sobre <strong>' + meta.periodoMeses + ' meses</strong> de historial (' + q + ' quincenas). ' +
+      'Si el período real es otro, cambialo en <strong>Configuración</strong> y se recalcula todo.</div></div>';
+
+    html += '<div class="toolbar" style="margin-top:18px;">' +
+      '<div class="search"><svg viewBox="0 0 24 24"><path d="M21 20l-5.6-5.6a7 7 0 1 0-1.4 1.4L20 21zM4 10a5 5 0 1 1 10 0 5 5 0 0 1-10 0z"/></svg>' +
+      '<input id="buscarC" type="text" placeholder="Buscar artículo…" value="' + esc(comprasBusqueda) + '"></div>' +
+      '<span class="muted nowrap">' + rank.length + ' artículos · ' + fmtInt(totalGen) + ' u. en ' + meta.periodoMeses + ' meses</span></div>';
+
+    html += '<div class="card"><div class="table-wrap"><table class="table"><thead><tr>' +
+      '<th style="width:42px;">#</th><th>Artículo</th><th class="num">Total histórico</th>' +
+      '<th class="num">Prom./mes</th><th class="num">Prom./quincena</th><th style="width:150px;">Volumen</th>' +
+      '</tr></thead><tbody>';
+    filt.forEach(function (x) {
+      var a = x.articulo;
+      var pos = rank.indexOf(x) + 1;
+      var pct = Math.max(3, (x.promQuincena / maxProm) * 100);
+      html += '<tr data-ver="' + a.id + '" style="cursor:pointer;">' +
+        '<td class="num muted">' + pos + '</td>' +
+        '<td><div class="cell-art"><img src="' + fotoDe(a) + '" alt=""><div><div class="nm">' + esc(a.nombre) + '</div><div class="cd">' + esc(a.codigo || '') + '</div></div></div></td>' +
+        '<td class="num">' + fmtInt(x.total) + '</td>' +
+        '<td class="num muted">' + fmtDec(x.promMes) + '</td>' +
+        '<td class="num"><strong style="font-size:15px;">' + fmtDec(x.promQuincena) + '</strong></td>' +
+        '<td><div class="bar"><div class="bar__fill fill-ok" style="width:' + pct + '%"></div></div></td>' +
+        '</tr>';
+    });
+    html += '</tbody></table></div></div>';
+    return html;
+  }
+  afterRender.compras = function () {
+    var inp = $('#buscarC');
+    if (inp) inp.addEventListener('input', function () {
+      comprasBusqueda = inp.value; var p = inp.selectionStart; render();
+      var ni = $('#buscarC'); if (ni) { ni.focus(); ni.setSelectionRange(p, p); }
+    });
     $$('[data-ver]').forEach(function (b) { b.addEventListener('click', function () { openArticuloDetalle(b.getAttribute('data-ver')); }); });
   };
 
@@ -388,21 +451,26 @@
   function openArticuloDetalle(id) {
     var a = S.getArticulo(id); if (!a) return;
     var stock = S.stockActual(id), t = S.totales(id), e = S.estado(a, stock);
-    var badge = e === 'sin' ? '<span class="badge badge--danger"><span class="dot"></span>Sin stock</span>'
-      : (e === 'bajo' ? '<span class="badge badge--warn"><span class="dot"></span>Para reponer</span>'
-        : '<span class="badge badge--ok"><span class="dot"></span>En nivel</span>');
+    var meta = S.getMeta();
+    var badge = e === 'config' ? '<span class="badge badge--muted"><span class="dot"></span>A configurar</span>'
+      : (e === 'sin' ? '<span class="badge badge--danger"><span class="dot"></span>Sin stock</span>'
+        : (e === 'bajo' ? '<span class="badge badge--warn"><span class="dot"></span>Para reponer</span>'
+          : '<span class="badge badge--ok"><span class="dot"></span>En nivel</span>'));
     var movs = S.getMovimientos({ articuloId: id }).slice(0, 8);
     var body = '<img src="' + fotoDe(a) + '" alt="" style="width:100%;height:190px;object-fit:cover;border-radius:13px;margin-bottom:16px;">' +
       '<div class="row" style="justify-content:space-between;margin-bottom:6px;">' +
       '<div><div class="article-card__code">' + esc(a.codigo || '') + '</div><h2 style="font-size:20px;">' + esc(a.nombre) + '</h2></div>' + badge + '</div>' +
       (a.descripcion ? '<p class="muted" style="margin-bottom:16px;line-height:1.5;">' + esc(a.descripcion) + '</p>' : '') +
+      '<div class="callout" style="margin-bottom:14px;"><svg viewBox="0 0 24 24"><path d="M3 13h2v7H3zM10 8h2v12h-2zM17 4h2v16h-2z"/></svg>' +
+      '<div>El cliente te compra en promedio <strong>' + fmtDec(S.promedioQuincena(a)) + ' u./quincena</strong> ' +
+      '(' + fmtDec(S.promedioMes(a)) + ' u./mes · ' + fmtInt(a.totalHistorico || 0) + ' u. en ' + meta.periodoMeses + ' meses).</div></div>' +
       '<div class="stats" style="margin-bottom:8px;">' +
-      miniStat('Stock actual', fmtInt(stock)) +
-      miniStat('Stock máximo', fmtInt(a.stockMaximo)) +
-      miniStat('Punto de pedido', fmtInt(a.puntoPedido)) +
-      miniStat('A reponer', fmtInt(S.sugerido(a, stock))) +
+      miniStat('Stock actual', e === 'config' ? '—' : fmtInt(stock)) +
+      miniStat('Stock máximo', a.stockMaximo ? fmtInt(a.stockMaximo) : '—') +
+      miniStat('Punto de pedido', a.stockMaximo ? fmtInt(a.puntoPedido) : '—') +
+      miniStat('A reponer', e === 'config' ? '—' : fmtInt(S.sugerido(a, stock))) +
       '</div>' +
-      '<div class="row" style="gap:18px;margin:10px 2px 4px;font-size:13px;" class="muted">' +
+      '<div class="row" style="gap:18px;margin:10px 2px 4px;font-size:13px;">' +
       '<span class="muted">Inicial: <strong>' + fmtInt(a.stockInicial) + '</strong></span>' +
       '<span class="muted">Entregas: <strong style="color:var(--ok)">+' + fmtInt(t.entregas) + '</strong></span>' +
       '<span class="muted">Ventas: <strong style="color:var(--primary)">−' + fmtInt(t.ventas) + '</strong></span>' +
@@ -736,11 +804,15 @@
     html += '<div class="card"><div class="card__head"><h2>Datos del negocio</h2></div><div class="card__body">' +
       '<form class="form" id="cfgForm">' +
       field('Nombre de tu empresa', '<input class="input" id="cEmpresa" value="' + esc(m.empresa) + '">', true) +
-      field('Cliente (consignatario)', '<input class="input" id="cCliente" value="' + esc(m.cliente) + '" placeholder="Ej: Kiosco El Sol">', true) +
+      field('Cliente (consignatario)', '<input class="input" id="cCliente" value="' + esc(m.cliente) + '" placeholder="Ej: Osa Distribuidora SRL">', true) +
+      '<div class="form-grid">' +
       field('Moneda', '<select class="select" id="cMoneda">' +
         ['ARS', 'USD', 'EUR', 'CLP', 'MXN', 'UYU', 'COP', 'PEN', 'BRL'].map(function (x) {
           return '<option value="' + x + '"' + (m.moneda === x ? ' selected' : '') + '>' + x + '</option>';
         }).join('') + '</select>') +
+      field('Meses del historial', '<input class="input" id="cPeriodo" type="number" min="1" step="1" value="' + (m.periodoMeses || 17) + '">') +
+      '</div>' +
+      '<div class="hint">«Meses del historial» es el período que abarca el total de compras de cada artículo. Se usa para calcular el promedio por quincena.</div>' +
       '<div class="form-actions"><button type="submit" class="btn btn--primary">Guardar cambios</button></div>' +
       '</form></div></div>';
     // Datos / respaldo
@@ -770,7 +842,8 @@
   afterRender.config = function () {
     $('#cfgForm').addEventListener('submit', function (e) {
       e.preventDefault();
-      S.setMeta({ empresa: $('#cEmpresa').value, cliente: $('#cCliente').value, moneda: $('#cMoneda').value });
+      var meses = Math.max(1, Math.round(parseFloat($('#cPeriodo').value) || 17));
+      S.setMeta({ empresa: $('#cEmpresa').value, cliente: $('#cCliente').value, moneda: $('#cMoneda').value, periodoMeses: meses });
       toast('Configuración guardada', 'ok'); updateBrand(); render();
     });
     bindAction('export', exportar);

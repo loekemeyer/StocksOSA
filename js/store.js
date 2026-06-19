@@ -14,9 +14,10 @@
         empresa: 'Mi Empresa',
         cliente: '',
         moneda: 'ARS',
+        periodoMeses: 17, // meses que abarca el "total histórico" (para el promedio por quincena)
         creado: Date.now()
       },
-      articulos: [], // {id,codigo,nombre,descripcion,foto,precio,stockInicial,stockMaximo,puntoPedido,activo}
+      articulos: [], // {id,codigo,nombre,descripcion,foto,precio,stockInicial,stockMaximo,puntoPedido,totalHistorico,activo}
       movimientos: [], // {id,articuloId,tipo,cantidad,fecha,nota}
       pedidos: [] // {id,fecha,estado,nota,items:[{articuloId,codigo,nombre,cantidad}]}
     };
@@ -90,6 +91,7 @@
       stockInicial: Math.max(0, Math.round(num(data.stockInicial, 0))),
       stockMaximo: Math.max(0, Math.round(num(data.stockMaximo, 0))),
       puntoPedido: Math.max(0, Math.round(num(data.puntoPedido, 0))),
+      totalHistorico: Math.max(0, Math.round(num(data.totalHistorico, 0))),
       activo: data.activo !== false
     };
     state.articulos.push(a);
@@ -107,6 +109,7 @@
     if (data.stockInicial !== undefined) a.stockInicial = Math.max(0, Math.round(num(data.stockInicial, 0)));
     if (data.stockMaximo !== undefined) a.stockMaximo = Math.max(0, Math.round(num(data.stockMaximo, 0)));
     if (data.puntoPedido !== undefined) a.puntoPedido = Math.max(0, Math.round(num(data.puntoPedido, 0)));
+    if (data.totalHistorico !== undefined) a.totalHistorico = Math.max(0, Math.round(num(data.totalHistorico, 0)));
     if (data.activo !== undefined) a.activo = !!data.activo;
     save();
     return a;
@@ -182,8 +185,9 @@
     });
     return t;
   }
-  // 'sin' (sin stock) | 'bajo' (en/abajo del punto de pedido) | 'ok'
+  // 'config' (sin stock máximo definido) | 'sin' | 'bajo' | 'ok'
   function estado(a, stock) {
+    if (!a.stockMaximo || a.stockMaximo <= 0) return 'config';
     if (stock === undefined) stock = stockActual(a.id);
     if (stock <= 0) return 'sin';
     if (stock <= (a.puntoPedido || 0)) return 'bajo';
@@ -194,6 +198,7 @@
     return Math.max(0, (a.stockMaximo || 0) - stock);
   }
   function necesitaPedido(a, stock) {
+    if (!a.stockMaximo || a.stockMaximo <= 0) return false; // sin configurar, no dispara
     if (stock === undefined) stock = stockActual(a.id);
     return stock <= (a.puntoPedido || 0) && sugerido(a, stock) > 0;
   }
@@ -204,6 +209,23 @@
       .filter(function (a) { return necesitaPedido(a, stocks[a.id]); })
       .map(function (a) {
         return { articulo: a, stock: stocks[a.id], sugerido: sugerido(a, stocks[a.id]) };
+      });
+  }
+
+  /* ---------- Promedio de compra por quincena ---------- */
+  // El cliente compra "totalHistorico" en "periodoMeses" meses. 1 mes = 2 quincenas.
+  function quincenasPeriodo() { return Math.max(1, (state.meta.periodoMeses || 17) * 2); }
+  function promedioQuincena(a) { return (a.totalHistorico || 0) / quincenasPeriodo(); }
+  function promedioMes(a) { return (a.totalHistorico || 0) / Math.max(1, state.meta.periodoMeses || 17); }
+  // Ranking de artículos por compra promedio por quincena (mayor a menor)
+  function rankingCompras() {
+    return state.articulos.slice()
+      .sort(function (a, b) {
+        var d = (b.totalHistorico || 0) - (a.totalHistorico || 0);
+        return d !== 0 ? d : (a.nombre || '').localeCompare(b.nombre || '', 'es');
+      })
+      .map(function (a) {
+        return { articulo: a, total: a.totalHistorico || 0, promQuincena: promedioQuincena(a), promMes: promedioMes(a) };
       });
   }
 
@@ -270,94 +292,123 @@
   }
   function resetAll() { state = blank(); save(); }
 
-  /* ---------- Catálogo real (Loekemeyer) ---------- */
-  // [codigo, nombre, ventasDelPeriodo 05/06–30/06]
+  /* ---------- Catálogo real (Loekemeyer · cliente Osa Distribuidora SRL) ----------
+     [codigo, nombre, totalHistorico]  ·  ordenado por total (mayor a menor).
+     El total abarca ~periodoMeses meses (ver meta.periodoMeses). */
   var CATALOGO = [
-    ['L031', 'Filtro p/café Loekemeyer', 12],
-    ['L057', 'Destapador Corona x 1', 4],
-    ['L222', 'Bate bife madera', 8],
-    ['L246', 'Prensa matambre', 0],
-    ['L315', 'Pisa papa de acero', 6],
-    ['L395', 'Descarozador de manzana', 1],
-    ['L396', 'Enrulador manteca Loekemeyer', 3],
-    ['L501', 'Abrelata manija', 29],
-    ['L502', 'Abrelata mariposa', 17],
-    ['L504', 'Afila cuchillo', 28],
-    ['L505', 'Pelapapa plástico', 82],
-    ['L506', 'Abrelata uña Loekemeyer', 36],
-    ['L507', 'Rompenueces', 1],
-    ['L508', 'Sacafuente articulado', 1],
-    ['L510', 'Abrelata uña cromado', 48],
-    ['L512', 'Abrelatas mariposa Loeke', 3],
-    ['L513', 'Pelapapa metal', 32],
-    ['L518', 'Sacafuente pizzero fijo', 4],
-    ['L519', 'Cuchillo p/untar x 2', 5],
-    ['L520', 'Sacacorcho mozo cromado', 5],
-    ['L521', 'Sacacorcho mozo cromado comb.', 3],
-    ['L523', 'Sacacorcho doble aleta cromado', 5],
-    ['L525', 'Sacacorcho cabo madera', 3],
-    ['L529', 'Sacacorcho doble impulso acero', 211],
-    ['L530', 'Sacacorcho tipo mozo pintado', 2],
-    ['L531', 'Sacacorcho combinado pintado', 1],
-    ['L539', 'Sacacorcho negro', 12],
-    ['L540', 'Sacacorcho premium', 3],
-    ['L542', 'Ahueca papas', 1],
-    ['L543', 'Ahueca frutas', 3],
-    ['L544', 'Batidor pera', 7],
-    ['L546', 'Corta queso', 23],
-    ['L548', 'Pincel pastelero', 3],
-    ['L551', 'Cuchillo p/untar x 2 color', 5],
-    ['L559', 'Corta ravioles', 5],
-    ['L560', 'Pinza chica de alambre', 3],
-    ['L561', 'Pinza grande de alambre', 1],
-    ['L562', 'Corta pizza', 9],
-    ['L564', 'Corta pizza gastronómico', 2],
-    ['L566', 'Aceitera 100 ml', 6],
-    ['L575', 'Tapón de vino/cerveza negro', 1],
-    ['L577', 'Tapón de vino/cerveza', 3],
-    ['L579', 'Tapón de vino/cerveza', 2],
-    ['L583', 'Especiero doble boquilla', 7],
-    ['L587', 'Pelapapa', 1],
-    ['L589', 'Pelador mango plástico', 7],
-    ['L598', 'Pelador negro dentado', 6],
-    ['L932', 'Cuchara nylon mango madera', 3],
-    ['L934', 'Cuchara fideos nylon mango madera', 2],
-    ['L935', 'Espátula calada nylon mango madera', 4],
-    ['L936', 'Cuchara calada nylon mango madera', 2],
-    ['L937', 'Batidor nylon mango madera', 2],
-    ['L942', 'Cuchara acero inoxidable', 2]
+    ['505', 'Pelador mango plástico', 6365],
+    ['513', 'Pelador mango metálico', 4075],
+    ['506', 'Abrelatas uña rojo', 3627],
+    ['504', 'Afila cuchillos', 2190],
+    ['501', 'Abrelatas a manija', 2184],
+    ['502', 'Abrelatas mariposa cromado', 1404],
+    ['546', 'Corta queso blandos mango Loeke', 760],
+    ['031', 'Filtro de café 10cm', 745],
+    ['544', 'Batidor pera alambre', 605],
+    ['520', 'Sacacorcho tipo mozo cromado', 397],
+    ['512', 'Abrelatas mariposa capuchón rojo', 390],
+    ['523', 'Sacacorcho doble aleta', 380],
+    ['529E', 'Sacacorcho doble impulso acero', 319],
+    ['315', 'Pisa papas acero inox', 307],
+    ['530', 'Sacacorcho tipo mozo color', 284],
+    ['521', 'Sacacorcho combinado cromado', 278],
+    ['519', 'Cuchillo untar mango madera x2', 266],
+    ['508', 'Sacafuentes articulado', 246],
+    ['579', 'Tapón de vino/cerveza x1 color', 239],
+    ['507', 'Rompenueces', 212],
+    ['587', 'Pelador metálico corte láser', 210],
+    ['562', 'Corta pizza 6cm mango Loeke', 194],
+    ['395', 'Descorazonador de manzana', 193],
+    ['577', 'Tapón de vino/cerveza x1 premium', 179],
+    ['559', 'Corta ravioles c/mango Loeke', 176],
+    ['531', 'Sacacorcho combinado color', 166],
+    ['057', 'Destapa corona x1 cromado', 160],
+    ['518', 'Sacafuente pizzero', 159],
+    ['575', 'Tapón de vino/cerveza x1 negro', 158],
+    ['510', 'Abrelata uña cromado', 150],
+    ['551', 'Cuchillo de untar mango plástico x2', 110],
+    ['560', 'Pinza corta alambre 21cm', 106],
+    ['589E', 'Pelador mango acrílico', 100],
+    ['598E', 'Pelador negro dentado', 100],
+    ['388E', 'Máquina corta papa', 96],
+    ['246', 'Prensa matambre', 81],
+    ['511', 'Abrelatas uña 3 en 1', 80],
+    ['564', 'Corta pizza 8cm mango madera', 78],
+    ['525E', 'Sacacorcho cabo de madera', 75],
+    ['542', 'Ahueca papas', 69],
+    ['580E', 'Batidor mini', 68],
+    ['580', 'Batidor mini', 63],
+    ['280', 'Manga repostera + 4 boquillas', 60],
+    ['525', 'Sacacorcho cabo madera', 55],
+    ['811E', 'Corta pizza mango ergonómico Ø9cm', 50],
+    ['543', 'Ahueca frutas', 42],
+    ['935E', 'Espátula calada nylon mango madera', 40],
+    ['538E', 'Sacacorcho azul', 40],
+    ['509', 'Pala batidora', 38],
+    ['515', 'Batidor resorte', 38],
+    ['934E', 'Cuchara fideos nylon mango madera', 35],
+    ['548', 'Pincel pastelero', 34],
+    ['361E', 'Rallador 4 lados acero inox', 31],
+    ['566E', 'Aceitera 100 ml', 30],
+    ['937E', 'Batidor pera nylon mango madera', 30],
+    ['583E', 'Especiero tapa bamboo', 30],
+    ['396', 'Enrulador de manteca', 25],
+    ['478E', 'Sacacorcho doble impulso', 25],
+    ['570', 'Pala de canelones', 23],
+    ['561', 'Pinza grande alambre', 22],
+    ['596', 'Pinza de ensalada mango plástico 23cm', 22],
+    ['229', 'Ñoquera madera', 20],
+    ['581', 'Sacacorcho mango ergonómico', 20],
+    ['931E', 'Espátula lisa nylon mango madera', 20],
+    ['936E', 'Espumadera nylon mango madera', 20],
+    ['932E', 'Cuchara nylon mango madera', 20],
+    ['540E', 'Sacacorcho premium', 20],
+    ['539E', 'Sacacorcho negro', 20],
+    ['536E', 'Sacacorcho full black', 20],
+    ['222', 'Bate bife madera', 16],
+    ['595', 'Pinza de fiambre mango plástico 23cm', 16],
+    ['948E', 'Espumadera acero inox', 16],
+    ['325', 'Espátula repostera plástico 1 pza', 15],
+    ['522E', 'Sacacorcho doble aleta premium', 15],
+    ['943E', 'Cucharón acero inox', 15],
+    ['574E', 'Artículo 574E', 15],
+    ['585E', 'Sacacorcho doble aleta fundición', 15],
+    ['809E', 'Corta pizza mango ergonómico 6cm', 15],
+    ['569', 'Pelanaranjas x1 display', 14],
+    ['554', 'Cucharita matera', 13],
+    ['945E', 'Espátula calada acero inox', 11],
+    ['563', 'Pinza hamburguesa', 10],
+    ['586', 'Pelapapas mango ergonómico', 10],
+    ['591', 'Despolvillador de yerba', 10],
+    ['933E', 'Cucharón nylon mango madera', 10],
+    ['941E', 'Espátula lisa acero inox', 10],
+    ['942E', 'Cuchara acero inox', 10],
+    ['944E', 'Cuchara fideos acero inox', 10],
+    ['817E', 'Rallador c/mango ergonómico', 10],
+    ['364E', 'Rallador gourmet grano medio', 10],
+    ['328E', 'Rallador plano 3 usos acero inox', 8],
+    ['360E', 'Rallador 4 lados a/l mango plástico', 6],
+    ['594', 'Pinza de fideos mango plástico 25cm', 3],
+    ['355', 'Pisa papas nylon con mango', 2],
+    ['524', 'Sacacorcho de espumantes', 2]
   ];
 
-  // Estimación inicial del stock máximo (≈ doble de lo vendido en el período, redondeado).
-  // Es solo un punto de partida editable: lo real lo define el usuario por artículo.
-  function estimateMax(v) {
-    if (!v || v <= 0) return 10;
-    return Math.max(10, Math.ceil((v * 2) / 5) * 5);
-  }
-
-  // Construye el estado inicial con el catálogo real y el informe de ventas cargado.
+  // Construye el estado inicial con el catálogo real precargado.
   function seedReal() {
     var st = blank();
     st.meta.empresa = 'Loekemeyer';
-    st.meta.cliente = '';
+    st.meta.cliente = 'Osa Distribuidora SRL';
     st.meta.moneda = 'ARS';
-    var fecha = '2026-06-30';
+    st.meta.periodoMeses = 17;
     CATALOGO.forEach(function (row) {
-      var codigo = row[0], nombre = row[1], ventas = row[2];
-      var max = estimateMax(ventas);
-      var id = 'a_' + codigo;
+      var codigo = row[0], nombre = row[1], total = row[2];
+      // Stock en 0 por ahora ("a configurar"): el usuario define inicial/máximo real más adelante.
       st.articulos.push({
-        id: id, codigo: codigo, nombre: nombre, descripcion: '',
+        id: 'a_' + codigo, codigo: codigo, nombre: nombre, descripcion: '',
         foto: placeholder(nombre), precio: 0,
-        stockInicial: max, stockMaximo: max, puntoPedido: Math.round(max * 0.5),
-        activo: true
+        stockInicial: 0, stockMaximo: 0, puntoPedido: 0,
+        totalHistorico: total, activo: true
       });
-      if (ventas > 0) {
-        st.movimientos.push({
-          id: 'm_' + codigo, articuloId: id, tipo: 'venta', cantidad: ventas,
-          fecha: fecha, nota: 'Informe del cliente · 05/06 a 30/06'
-        });
-      }
     });
     return st;
   }
@@ -370,18 +421,13 @@
     var d = new Date();
     return d.getFullYear() + '-' + pad(d.getMonth() + 1) + '-' + pad(d.getDate());
   }
-  function hoyMenos(dias) {
-    var d = new Date();
-    d.setDate(d.getDate() - dias);
-    return d.getFullYear() + '-' + pad(d.getMonth() + 1) + '-' + pad(d.getDate());
-  }
   function pad(n) { return n < 10 ? '0' + n : '' + n; }
 
   // Imagen placeholder (SVG data-uri) con iniciales y color por nombre
   function placeholder(nombre, color) {
     var palette = ['#6366f1', '#8b5cf6', '#0ea5e9', '#10b981', '#f59e0b', '#ef4444', '#ec4899', '#14b8a6'];
-    var initials = (nombre || '?')
-      .split(/\s+/).slice(0, 2).map(function (w) { return w.charAt(0); }).join('').toUpperCase();
+    nombre = nombre || '?';
+    var initials = nombre.split(/\s+/).slice(0, 2).map(function (w) { return w.charAt(0); }).join('').toUpperCase();
     var c = color;
     if (!c) {
       var h = 0;
@@ -418,6 +464,7 @@
     getMovimientos: getMovimientos, removeMovimiento: removeMovimiento,
     computeStocks: computeStocks, stockActual: stockActual, totales: totales,
     estado: estado, sugerido: sugerido, necesitaPedido: necesitaPedido, pedidoSugerido: pedidoSugerido,
+    promedioQuincena: promedioQuincena, promedioMes: promedioMes, rankingCompras: rankingCompras, quincenasPeriodo: quincenasPeriodo,
     crearPedido: crearPedido, getPedidos: getPedidos, getPedido: getPedido,
     marcarPedidoEntregado: marcarPedidoEntregado, eliminarPedido: eliminarPedido,
     exportData: exportData, importData: importData, resetAll: resetAll, loadDemo: loadDemo,
