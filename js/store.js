@@ -412,13 +412,17 @@
     st.meta.cliente = 'Osa Distribuidora SRL';
     st.meta.moneda = 'ARS';
     st.meta.periodoMeses = 17;
+    var meses = st.meta.periodoMeses || 17;
     CATALOGO.forEach(function (row) {
       var codigo = row[0], nombre = row[1], total = row[2];
-      // Stock en 0 por ahora ("a configurar"): el usuario define inicial/máximo real más adelante.
+      var promMes = total / meses;            // promedio de compra por mes
+      var max = Math.round(1.5 * promMes);    // stock máximo = 1.5 meses de demanda
       st.articulos.push({
         id: 'a_' + codigo, codigo: codigo, nombre: nombre, descripcion: '',
         foto: placeholder(nombre), precio: 0,
-        stockInicial: 0, stockMaximo: 0, puntoPedido: 0,
+        stockInicial: max,                    // arranca "lleno" (= máximo)
+        stockMaximo: max,
+        puntoPedido: Math.round(promMes / 2), // repone al bajar de ~media quincena
         totalHistorico: total, activo: true
       });
     });

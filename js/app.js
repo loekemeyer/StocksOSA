@@ -5,7 +5,7 @@
   'use strict';
 
   var S = window.Store;
-  var APP_VERSION = '1.0.2';
+  var APP_VERSION = '1.0.3';
 
   /* ---------- Estado de UI ---------- */
   var ui = {
