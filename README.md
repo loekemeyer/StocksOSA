@@ -22,10 +22,18 @@ Stock actual = Stock inicial + Entregas (las cargás vos) − Ventas (las inform
 
 ## 🖥️ Usarla
 
-### Online
-El sitio se publica solo en **GitHub Pages** con cada cambio en `main`:
+### Online (GitHub Pages)
+Se publica gratis desde este repositorio. **Activación única** (una sola vez):
 
-> **https://loekemeyer.github.io/stocksosa/**
+1. Entrá a **Settings → Pages** del repositorio.
+2. En **Build and deployment → Source**, elegí **Deploy from a branch**.
+3. **Branch:** `main`, **carpeta:** `/ (root)` → **Save**.
+
+En 1–2 minutos queda online en:
+
+> **https://loekemeyer.github.io/StocksOSA/**
+
+A partir de ahí, cada push a `main` se publica solo.
 
 ### En tu computadora
 No necesita instalación. Opciones:
