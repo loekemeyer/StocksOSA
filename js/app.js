@@ -5,6 +5,7 @@
   'use strict';
 
   var S = window.Store;
+  var APP_VERSION = '1.0.0';
 
   /* ---------- Estado de UI ---------- */
   var ui = {
@@ -838,6 +839,8 @@
       '<li>Cuando un artículo llega al punto de pedido, aparece en <strong style="color:var(--text)">Pedido sugerido</strong>.</li>' +
       '<li>Confirmás el pedido, lo imprimís y, al entregar, lo marcás como <strong style="color:var(--text)">entregado</strong>: el stock se repone automáticamente.</li>' +
       '</ol></div></div>';
+
+    html += '<p class="muted text-c" style="margin-top:20px;font-size:12px;">StockRotativo · versión ' + APP_VERSION + '</p>';
     return html;
   }
   afterRender.config = function () {
@@ -934,6 +937,8 @@
 
   /* ---------- Init ---------- */
   function init() {
+    var vEl = $('#appVersion');
+    if (vEl) vEl.textContent = 'v' + APP_VERSION;
     var v = (location.hash || '').replace('#/', '');
     setView(v || 'panel');
   }

@@ -93,6 +93,7 @@ svg { display: block; }
 
 .nav { display: flex; flex-direction: column; gap: 4px; flex: 1; }
 .sidebar__foot { margin-top: 10px; padding-top: 12px; border-top: 1px solid rgba(255,255,255,.16); }
+.sidebar__version { font-size: 11px; color: rgba(255,255,255,.5); padding: 9px 13px 2px; letter-spacing: .02em; }
 
 .nav__item {
   display: flex;
