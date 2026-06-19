@@ -36,8 +36,9 @@
       .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
       .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
   }
-  function fmtInt(n) { return new Intl.NumberFormat('es-AR').format(Math.round(n || 0)); }
-  function fmtDec(n) { return new Intl.NumberFormat('es-AR', { maximumFractionDigits: 1 }).format(n || 0); }
+  // Sin separadores de miles ni comas (números "planos"). Decimales con punto.
+  function fmtInt(n) { return String(Math.round(n || 0)); }
+  function fmtDec(n) { return String(Math.round((n || 0) * 10) / 10); }
   function fmtMoney(n) {
     var m = S.getMeta().moneda || 'ARS';
     try { return new Intl.NumberFormat('es-AR', { style: 'currency', currency: m, maximumFractionDigits: 0 }).format(n || 0); }
@@ -168,9 +169,9 @@
     var html = '';
     html += '<div class="stats">';
     html += stat('primary', iconBox(), 'Artículos activos', fmtInt(arts.length), 'en consignación');
-    html += stat('ok', iconLayers(), 'Unidades en stock', fmtInt(unidades), fmtMoney(valor) + ' en mercadería');
+    html += stat('ok', iconLayers(), 'Cajas en stock', fmtInt(unidades), valor > 0 ? fmtMoney(valor) + ' en mercadería' : 'en el cliente');
     html += stat(alertas ? 'warn' : 'ok', iconBell(), 'Para reponer', fmtInt(alertas), alertas ? 'artículos bajo el punto' : 'todo en nivel');
-    html += stat(sinStock ? 'danger' : 'primary', iconCart(), 'Pedido sugerido', fmtInt(unidadesPedido), sinStock ? sinStock + ' sin stock' : 'unidades a reponer');
+    html += stat(sinStock ? 'danger' : 'primary', iconCart(), 'Pedido sugerido', fmtInt(unidadesPedido), sinStock ? sinStock + ' sin stock' : 'cajas a reponer');
     html += '</div>';
 
     html += '<div class="grid-2">';
@@ -302,9 +303,9 @@
           : '<span class="article-card__flag flag-ok">En nivel</span>'));
     var stockLine = isConfig
       ? '<div class="stock-row"><span class="now" style="color:var(--muted-2);">—</span>' +
-        '<span class="max">≈ ' + fmtDec(S.promedioQuincena(a)) + ' u./quincena</span></div>' +
+        '<span class="max">≈ ' + fmtDec(S.promedioQuincena(a)) + ' cajas/quincena</span></div>' +
         '<div class="bar"><div class="bar__fill" style="width:0%"></div></div>'
-      : '<div class="stock-row"><span class="now">' + fmtInt(stock) + ' <span class="max">u.</span></span>' +
+      : '<div class="stock-row"><span class="now">' + fmtInt(stock) + ' <span class="max">cajas</span></span>' +
         '<span class="max">máx ' + fmtInt(a.stockMaximo) + ' · pto ' + fmtInt(a.puntoPedido) + '</span></div>' +
         '<div class="bar"><div class="bar__fill ' + fill + '" style="width:' + pct + '%"></div></div>';
     return '<div class="article-card">' +
@@ -345,17 +346,17 @@
     });
 
     var html = '<div class="callout"><svg viewBox="0 0 24 24"><path d="M12 2a10 10 0 1 0 0 20 10 10 0 0 0 0-20zm1 15h-2v-6h2v6zm0-8h-2V7h2v2z"/></svg>' +
-      '<div>Promedio calculado sobre <strong>' + meta.periodoMeses + ' meses</strong> de historial (' + q + ' quincenas). ' +
+      '<div>Cantidades expresadas en <strong>cajas</strong>. Promedio calculado sobre <strong>' + meta.periodoMeses + ' meses</strong> de historial (' + q + ' quincenas). ' +
       'Si el período real es otro, cambialo en <strong>Configuración</strong> y se recalcula todo.</div></div>';
 
     html += '<div class="toolbar" style="margin-top:18px;">' +
       '<div class="search"><svg viewBox="0 0 24 24"><path d="M21 20l-5.6-5.6a7 7 0 1 0-1.4 1.4L20 21zM4 10a5 5 0 1 1 10 0 5 5 0 0 1-10 0z"/></svg>' +
       '<input id="buscarC" type="text" placeholder="Buscar artículo…" value="' + esc(comprasBusqueda) + '"></div>' +
-      '<span class="muted nowrap">' + rank.length + ' artículos · ' + fmtInt(totalGen) + ' u. en ' + meta.periodoMeses + ' meses</span></div>';
+      '<span class="muted nowrap">' + rank.length + ' artículos · ' + fmtInt(totalGen) + ' cajas en ' + meta.periodoMeses + ' meses</span></div>';
 
     html += '<div class="card"><div class="table-wrap"><table class="table"><thead><tr>' +
-      '<th style="width:42px;">#</th><th>Artículo</th><th class="num">Total histórico</th>' +
-      '<th class="num">Prom./mes</th><th class="num">Prom./quincena</th><th style="width:150px;">Volumen</th>' +
+      '<th style="width:42px;">#</th><th>Artículo</th><th class="num">Total cajas</th>' +
+      '<th class="num">Cajas/mes</th><th class="num">Cajas/quincena</th><th style="width:150px;">Volumen</th>' +
       '</tr></thead><tbody>';
     filt.forEach(function (x) {
       var a = x.articulo;
@@ -462,8 +463,8 @@
       '<div><div class="article-card__code">' + esc(a.codigo || '') + '</div><h2 style="font-size:20px;">' + esc(a.nombre) + '</h2></div>' + badge + '</div>' +
       (a.descripcion ? '<p class="muted" style="margin-bottom:16px;line-height:1.5;">' + esc(a.descripcion) + '</p>' : '') +
       '<div class="callout" style="margin-bottom:14px;"><svg viewBox="0 0 24 24"><path d="M3 13h2v7H3zM10 8h2v12h-2zM17 4h2v16h-2z"/></svg>' +
-      '<div>El cliente te compra en promedio <strong>' + fmtDec(S.promedioQuincena(a)) + ' u./quincena</strong> ' +
-      '(' + fmtDec(S.promedioMes(a)) + ' u./mes · ' + fmtInt(a.totalHistorico || 0) + ' u. en ' + meta.periodoMeses + ' meses).</div></div>' +
+      '<div>El cliente te compra en promedio <strong>' + fmtDec(S.promedioQuincena(a)) + ' cajas/quincena</strong> ' +
+      '(' + fmtDec(S.promedioMes(a)) + ' cajas/mes · ' + fmtInt(a.totalHistorico || 0) + ' cajas en ' + meta.periodoMeses + ' meses).</div></div>' +
       '<div class="stats" style="margin-bottom:8px;">' +
       miniStat('Stock actual', e === 'config' ? '—' : fmtInt(stock)) +
       miniStat('Stock máximo', a.stockMaximo ? fmtInt(a.stockMaximo) : '—') +
@@ -498,8 +499,8 @@
     var esVenta = tipo === 'venta';
     var titulo = esVenta ? 'Ventas informadas por el cliente' : 'Entregas que hiciste al cliente';
     var explica = esVenta
-      ? 'Cargá las unidades que el cliente <strong>vendió</strong> en el período (informe quincenal). Se descuentan del stock.'
-      : 'Cargá las unidades que <strong>entregaste</strong> para reponer. Se suman al stock del cliente.';
+      ? 'Cargá las cajas que el cliente <strong>vendió</strong> en el período (informe quincenal). Se descuentan del stock.'
+      : 'Cargá las cajas que <strong>entregaste</strong> para reponer. Se suman al stock del cliente.';
 
     var html = '<div class="callout' + (esVenta ? '' : '') + '"><svg viewBox="0 0 24 24"><path d="M12 2a10 10 0 1 0 0 20 10 10 0 0 0 0-20zm1 15h-2v-6h2v6zm0-8h-2V7h2v2z"/></svg><div>' + explica + '</div></div>';
     html += '<div class="card" style="margin-top:18px;">';
@@ -591,7 +592,7 @@
       html += '<div class="callout"><svg viewBox="0 0 24 24"><path d="M12 2a10 10 0 1 0 0 20 10 10 0 0 0 0-20zm1 15h-2v-6h2v6zm0-8h-2V7h2v2z"/></svg>' +
         '<div>Estos artículos están en o por debajo de su punto de pedido. Las cantidades sugeridas reponen hasta el stock máximo. Podés ajustarlas antes de generar el pedido.</div></div>';
       html += '<div class="card" style="margin-top:18px;">';
-      html += '<div class="card__head"><h2>Reposición sugerida</h2><div class="spacer"></div><span class="badge badge--primary">' + sug.length + ' artículos · ' + fmtInt(totalU) + ' u.</span></div>';
+      html += '<div class="card__head"><h2>Reposición sugerida</h2><div class="spacer"></div><span class="badge badge--primary">' + sug.length + ' artículos · ' + fmtInt(totalU) + ' cajas</span></div>';
       html += '<div class="table-wrap"><table class="table"><thead><tr>' +
         '<th>Artículo</th><th class="num">Stock</th><th class="num">Punto</th><th class="num">Máximo</th><th class="num">A pedir</th>' +
         (totalV ? '<th class="num">Subtotal</th>' : '') + '</tr></thead><tbody>';
@@ -620,7 +621,7 @@
     if (!pedidos.length) {
       html += '<div class="card"><div class="card__body"><p class="muted text-c" style="padding:16px 0;">Todavía no generaste pedidos. Cuando confirmes uno, quedará acá para imprimir o marcar como entregado.</p></div></div>';
     } else {
-      html += '<div class="card"><div class="table-wrap"><table class="table"><thead><tr><th>Pedido</th><th>Fecha</th><th class="num">Ítems</th><th class="num">Unidades</th><th>Estado</th><th class="right">Acciones</th></tr></thead><tbody>';
+      html += '<div class="card"><div class="table-wrap"><table class="table"><thead><tr><th>Pedido</th><th>Fecha</th><th class="num">Ítems</th><th class="num">Cajas</th><th>Estado</th><th class="right">Acciones</th></tr></thead><tbody>';
       pedidos.forEach(function (p) {
         var u = p.items.reduce(function (a, it) { return a + it.cantidad; }, 0);
         var est = p.estado === 'entregado' ? '<span class="badge badge--ok"><span class="dot"></span>Entregado</span>' : '<span class="badge badge--warn"><span class="dot"></span>Pendiente</span>';
@@ -704,7 +705,7 @@
       '<table><thead><tr><th>Código</th><th>Artículo</th><th style="text-align:right">Cantidad</th>' +
       (hayPrecio ? '<th style="text-align:right">Precio</th><th style="text-align:right">Subtotal</th>' : '') +
       '</tr></thead><tbody>' + rows + '</tbody></table>' +
-      '<div class="tot">Total unidades: ' + fmtInt(totalU) + (hayPrecio ? ' &nbsp;·&nbsp; Total: ' + fmtMoney(totalV) : '') + '</div>' +
+      '<div class="tot">Total cajas: ' + fmtInt(totalU) + (hayPrecio ? ' &nbsp;·&nbsp; Total: ' + fmtMoney(totalV) : '') + '</div>' +
       '<p class="muted" style="margin-top:40px;font-size:12px;">Generado con StockRotativo · ' + fmtFecha(S.hoyISO()) + '</p>' +
       '</body></html>';
   }
@@ -781,7 +782,7 @@
       field('Fecha', '<input class="input" id="ajFecha" type="date" value="' + S.hoyISO() + '">') +
       '</div>' +
       field('Nota <span class="opt">(opcional)</span>', '<input class="input" id="ajNota" placeholder="Ej: rotura, faltante, corrección de inventario">', true) +
-      '<div class="hint">Un ajuste suma o resta unidades directamente (por roturas, vencimientos, recuentos). Usá número negativo para descontar.</div>' +
+      '<div class="hint">Un ajuste suma o resta cajas directamente (por roturas, vencimientos, recuentos). Usá número negativo para descontar.</div>' +
       '<div class="form-actions"><button type="button" class="btn btn--ghost" data-close>Cancelar</button>' +
       '<button type="submit" class="btn btn--primary">Guardar ajuste</button></div></form>';
     openModal('Ajuste manual de stock', body);
