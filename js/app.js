@@ -5,7 +5,7 @@
   'use strict';
 
   var S = window.Store;
-  var APP_VERSION = '1.0.1';
+  var APP_VERSION = '1.0.2';
 
   /* ---------- Estado de UI ---------- */
   var ui = {
@@ -339,13 +339,13 @@
     if (!rank.length) return emptyApp();
     var meta = S.getMeta();
     var q = S.quincenasPeriodo();
-    var maxProm = rank[0].promQuincena || 1;
     var qq = comprasBusqueda.toLowerCase();
     var filt = rank.filter(function (x) {
       return !qq || (x.articulo.nombre + ' ' + x.articulo.codigo).toLowerCase().indexOf(qq) >= 0;
     });
 
-    var html = '<div class="callout"><svg viewBox="0 0 24 24"><path d="M12 2a10 10 0 1 0 0 20 10 10 0 0 0 0-20zm1 15h-2v-6h2v6zm0-8h-2V7h2v2z"/></svg>' +
+    var html = '<div class="ranking">';
+    html += '<div class="callout"><svg viewBox="0 0 24 24"><path d="M12 2a10 10 0 1 0 0 20 10 10 0 0 0 0-20zm1 15h-2v-6h2v6zm0-8h-2V7h2v2z"/></svg>' +
       '<div>Cantidades expresadas en <strong>cajas</strong>. Promedio calculado sobre <strong>' + meta.periodoMeses + ' meses</strong> de historial (' + q + ' quincenas). ' +
       'Si el período real es otro, cambialo en <strong>Configuración</strong> y se recalcula todo.</div></div>';
 
@@ -355,22 +355,21 @@
       '<span class="muted nowrap">' + rank.length + ' artículos · promedio de los últimos ' + meta.periodoMeses + ' meses</span></div>';
 
     html += '<div class="card"><div class="table-wrap"><table class="table"><thead><tr>' +
-      '<th style="width:42px;">#</th><th>Artículo</th>' +
-      '<th class="num">Cajas/mes</th><th class="num">Cajas/quincena</th><th style="width:160px;">Volumen</th>' +
+      '<th style="width:40px;">#</th><th>Artículo</th>' +
+      '<th class="num" style="width:118px;">Cajas/mes</th><th class="num" style="width:140px;">Cajas/quincena</th>' +
       '</tr></thead><tbody>';
     filt.forEach(function (x) {
       var a = x.articulo;
       var pos = rank.indexOf(x) + 1;
-      var pct = Math.max(3, (x.promQuincena / maxProm) * 100);
       html += '<tr data-ver="' + a.id + '" style="cursor:pointer;">' +
         '<td class="num muted">' + pos + '</td>' +
         '<td><div class="cell-art"><img src="' + fotoDe(a) + '" alt=""><div><div class="nm">' + esc(a.nombre) + '</div><div class="cd">' + esc(a.codigo || '') + '</div></div></div></td>' +
         '<td class="num muted">' + fmtDec(x.promMes) + '</td>' +
         '<td class="num"><strong style="font-size:15px;">' + fmtDec(x.promQuincena) + '</strong></td>' +
-        '<td><div class="bar"><div class="bar__fill fill-ok" style="width:' + pct + '%"></div></div></td>' +
         '</tr>';
     });
     html += '</tbody></table></div></div>';
+    html += '</div>';
     return html;
   }
   afterRender.compras = function () {

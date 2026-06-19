@@ -295,6 +295,7 @@ svg { display: block; }
 
 /* ---------- Tablas ---------- */
 .table-wrap { overflow-x: auto; }
+.ranking { max-width: 680px; }
 .table { width: 100%; border-collapse: collapse; font-size: 14px; }
 .table th, .table td { padding: 13px 14px; text-align: left; border-bottom: 1px solid var(--line); vertical-align: middle; }
 .table th { font-size: 12px; text-transform: uppercase; letter-spacing: .04em; color: var(--muted); font-weight: 700; background: var(--surface-2); }
