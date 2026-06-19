@@ -196,9 +196,10 @@
     return Math.max(0, (a.stockMaximo || 0) - stock);
   }
   function necesitaPedido(a, stock) {
-    if (!a.stockMaximo || a.stockMaximo <= 0) return false; // sin configurar, no dispara
+    if (!a.stockMaximo || a.stockMaximo <= 0) return false; // sin máximo definido, no aplica
     if (stock === undefined) stock = stockActual(a.id);
-    return stock <= (a.puntoPedido || 0) && sugerido(a, stock) > 0;
+    // Pedido = stock máximo - stock real. Genera pedido siempre que falte (incluido stock 0 o negativo).
+    return sugerido(a, stock) > 0;
   }
   // Lista de reposición sugerida (artículos activos que necesitan pedido)
   function pedidoSugerido() {

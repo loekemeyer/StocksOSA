@@ -5,7 +5,7 @@
   'use strict';
 
   var S = window.Store;
-  var APP_VERSION = '1.0.4';
+  var APP_VERSION = '1.0.5';
 
   /* ---------- Estado de UI ---------- */
   var ui = {
@@ -171,7 +171,7 @@
     html += '<div class="stats">';
     html += stat('primary', iconBox(), 'Artículos activos', fmtInt(arts.length), 'en consignación');
     html += stat('ok', iconLayers(), 'Cajas en stock', fmtInt(unidades), valor > 0 ? fmtMoney(valor) + ' en mercadería' : 'en el cliente');
-    html += stat(alertas ? 'warn' : 'ok', iconBell(), 'Para reponer', fmtInt(alertas), alertas ? 'artículos bajo el punto' : 'todo en nivel');
+    html += stat(sug.length ? 'warn' : 'ok', iconBell(), 'Para reponer', fmtInt(sug.length), sug.length ? 'artículos a reponer' : 'todo al máximo');
     html += stat(sinStock ? 'danger' : 'primary', iconCart(), 'Pedido sugerido', fmtInt(unidadesPedido), sinStock ? sinStock + ' sin stock' : 'cajas a reponer');
     html += '</div>';
 
