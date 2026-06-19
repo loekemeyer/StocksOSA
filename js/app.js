@@ -5,7 +5,7 @@
   'use strict';
 
   var S = window.Store;
-  var APP_VERSION = '1.0.3';
+  var APP_VERSION = '1.0.4';
 
   /* ---------- Estado de UI ---------- */
   var ui = {
@@ -37,9 +37,9 @@
       .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
       .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
   }
-  // Sin separadores de miles ni comas (números "planos"). Decimales con punto.
+  // Sin separadores de miles ni comas (números "planos"). Sin decimales (redondeado).
   function fmtInt(n) { return String(Math.round(n || 0)); }
-  function fmtDec(n) { return String(Math.round((n || 0) * 10) / 10); }
+  function fmtDec(n) { return String(Math.round(n || 0)); }
   function fmtMoney(n) {
     var m = S.getMeta().moneda || 'ARS';
     try { return new Intl.NumberFormat('es-AR', { style: 'currency', currency: m, maximumFractionDigits: 0 }).format(n || 0); }
