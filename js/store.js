@@ -27,7 +27,7 @@
   function load() {
     try {
       var raw = localStorage.getItem(KEY);
-      if (!raw) return blank();
+      if (!raw) return seedReal(); // primera vez: catálogo real precargado
       var p = JSON.parse(raw);
       var base = blank();
       base.meta = Object.assign(base.meta, p.meta || {});
@@ -270,34 +270,100 @@
   }
   function resetAll() { state = blank(); save(); }
 
-  /* ---------- Datos de ejemplo ---------- */
-  function loadDemo() {
-    state = blank();
-    state.meta.empresa = 'Distribuidora Aurora';
-    state.meta.cliente = 'Kiosco El Sol';
-    var demo = [
-      { codigo: 'BEB-001', nombre: 'Agua Mineral 500ml', descripcion: 'Botella de agua sin gas, pack individual.', precio: 700, stockInicial: 48, stockMaximo: 60, puntoPedido: 24, color: '#3b82f6' },
-      { codigo: 'BEB-014', nombre: 'Gaseosa Cola 2,25L', descripcion: 'Bebida cola retornable familiar.', precio: 2200, stockInicial: 30, stockMaximo: 36, puntoPedido: 14, color: '#ef4444' },
-      { codigo: 'GOL-007', nombre: 'Alfajor Triple', descripcion: 'Alfajor de chocolate relleno con dulce de leche.', precio: 950, stockInicial: 80, stockMaximo: 120, puntoPedido: 45, color: '#a16207' },
-      { codigo: 'SNK-022', nombre: 'Papas Fritas 120g', descripcion: 'Snack clásico, bolsa familiar.', precio: 1800, stockInicial: 40, stockMaximo: 50, puntoPedido: 20, color: '#f59e0b' },
-      { codigo: 'GAL-003', nombre: 'Galletitas Surtidas', descripcion: 'Paquete de galletitas dulces variadas.', precio: 1500, stockInicial: 35, stockMaximo: 48, puntoPedido: 18, color: '#10b981' },
-      { codigo: 'LAC-009', nombre: 'Yogur Bebible 1L', descripcion: 'Yogur sabor frutilla, botella de 1 litro.', precio: 2600, stockInicial: 20, stockMaximo: 30, puntoPedido: 12, color: '#ec4899' }
-    ];
-    demo.forEach(function (d) {
-      addArticulo({
-        codigo: d.codigo, nombre: d.nombre, descripcion: d.descripcion, precio: d.precio,
-        stockInicial: d.stockInicial, stockMaximo: d.stockMaximo, puntoPedido: d.puntoPedido,
-        foto: placeholder(d.nombre, d.color)
-      });
-    });
-    // Simular una informe de ventas (últimos 15 días) para que dispare pedidos
-    var arts = state.articulos;
-    var ventas = [30, 22, 50, 28, 24, 14];
-    arts.forEach(function (a, i) {
-      addMovimiento({ articuloId: a.id, tipo: 'venta', cantidad: ventas[i] || 0, fecha: hoyMenos(15), nota: 'Informe quincenal del cliente' });
-    });
-    save();
+  /* ---------- Catálogo real (Loekemeyer) ---------- */
+  // [codigo, nombre, ventasDelPeriodo 05/06–30/06]
+  var CATALOGO = [
+    ['L031', 'Filtro p/café Loekemeyer', 12],
+    ['L057', 'Destapador Corona x 1', 4],
+    ['L222', 'Bate bife madera', 8],
+    ['L246', 'Prensa matambre', 0],
+    ['L315', 'Pisa papa de acero', 6],
+    ['L395', 'Descarozador de manzana', 1],
+    ['L396', 'Enrulador manteca Loekemeyer', 3],
+    ['L501', 'Abrelata manija', 29],
+    ['L502', 'Abrelata mariposa', 17],
+    ['L504', 'Afila cuchillo', 28],
+    ['L505', 'Pelapapa plástico', 82],
+    ['L506', 'Abrelata uña Loekemeyer', 36],
+    ['L507', 'Rompenueces', 1],
+    ['L508', 'Sacafuente articulado', 1],
+    ['L510', 'Abrelata uña cromado', 48],
+    ['L512', 'Abrelatas mariposa Loeke', 3],
+    ['L513', 'Pelapapa metal', 32],
+    ['L518', 'Sacafuente pizzero fijo', 4],
+    ['L519', 'Cuchillo p/untar x 2', 5],
+    ['L520', 'Sacacorcho mozo cromado', 5],
+    ['L521', 'Sacacorcho mozo cromado comb.', 3],
+    ['L523', 'Sacacorcho doble aleta cromado', 5],
+    ['L525', 'Sacacorcho cabo madera', 3],
+    ['L529', 'Sacacorcho doble impulso acero', 211],
+    ['L530', 'Sacacorcho tipo mozo pintado', 2],
+    ['L531', 'Sacacorcho combinado pintado', 1],
+    ['L539', 'Sacacorcho negro', 12],
+    ['L540', 'Sacacorcho premium', 3],
+    ['L542', 'Ahueca papas', 1],
+    ['L543', 'Ahueca frutas', 3],
+    ['L544', 'Batidor pera', 7],
+    ['L546', 'Corta queso', 23],
+    ['L548', 'Pincel pastelero', 3],
+    ['L551', 'Cuchillo p/untar x 2 color', 5],
+    ['L559', 'Corta ravioles', 5],
+    ['L560', 'Pinza chica de alambre', 3],
+    ['L561', 'Pinza grande de alambre', 1],
+    ['L562', 'Corta pizza', 9],
+    ['L564', 'Corta pizza gastronómico', 2],
+    ['L566', 'Aceitera 100 ml', 6],
+    ['L575', 'Tapón de vino/cerveza negro', 1],
+    ['L577', 'Tapón de vino/cerveza', 3],
+    ['L579', 'Tapón de vino/cerveza', 2],
+    ['L583', 'Especiero doble boquilla', 7],
+    ['L587', 'Pelapapa', 1],
+    ['L589', 'Pelador mango plástico', 7],
+    ['L598', 'Pelador negro dentado', 6],
+    ['L932', 'Cuchara nylon mango madera', 3],
+    ['L934', 'Cuchara fideos nylon mango madera', 2],
+    ['L935', 'Espátula calada nylon mango madera', 4],
+    ['L936', 'Cuchara calada nylon mango madera', 2],
+    ['L937', 'Batidor nylon mango madera', 2],
+    ['L942', 'Cuchara acero inoxidable', 2]
+  ];
+
+  // Estimación inicial del stock máximo (≈ doble de lo vendido en el período, redondeado).
+  // Es solo un punto de partida editable: lo real lo define el usuario por artículo.
+  function estimateMax(v) {
+    if (!v || v <= 0) return 10;
+    return Math.max(10, Math.ceil((v * 2) / 5) * 5);
   }
+
+  // Construye el estado inicial con el catálogo real y el informe de ventas cargado.
+  function seedReal() {
+    var st = blank();
+    st.meta.empresa = 'Loekemeyer';
+    st.meta.cliente = '';
+    st.meta.moneda = 'ARS';
+    var fecha = '2026-06-30';
+    CATALOGO.forEach(function (row) {
+      var codigo = row[0], nombre = row[1], ventas = row[2];
+      var max = estimateMax(ventas);
+      var id = 'a_' + codigo;
+      st.articulos.push({
+        id: id, codigo: codigo, nombre: nombre, descripcion: '',
+        foto: placeholder(nombre), precio: 0,
+        stockInicial: max, stockMaximo: max, puntoPedido: Math.round(max * 0.5),
+        activo: true
+      });
+      if (ventas > 0) {
+        st.movimientos.push({
+          id: 'm_' + codigo, articuloId: id, tipo: 'venta', cantidad: ventas,
+          fecha: fecha, nota: 'Informe del cliente · 05/06 a 30/06'
+        });
+      }
+    });
+    return st;
+  }
+
+  // Botón "Cargar datos de ejemplo" = restaurar el catálogo real.
+  function loadDemo() { state = seedReal(); save(); }
 
   /* ---------- Utilidades ---------- */
   function hoyISO() {
