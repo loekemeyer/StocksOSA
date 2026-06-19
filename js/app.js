@@ -5,7 +5,7 @@
   'use strict';
 
   var S = window.Store;
-  var APP_VERSION = '1.0.0';
+  var APP_VERSION = '1.0.1';
 
   /* ---------- Estado de UI ---------- */
   var ui = {
@@ -339,7 +339,6 @@
     if (!rank.length) return emptyApp();
     var meta = S.getMeta();
     var q = S.quincenasPeriodo();
-    var totalGen = rank.reduce(function (a, x) { return a + x.total; }, 0);
     var maxProm = rank[0].promQuincena || 1;
     var qq = comprasBusqueda.toLowerCase();
     var filt = rank.filter(function (x) {
@@ -353,11 +352,11 @@
     html += '<div class="toolbar" style="margin-top:18px;">' +
       '<div class="search"><svg viewBox="0 0 24 24"><path d="M21 20l-5.6-5.6a7 7 0 1 0-1.4 1.4L20 21zM4 10a5 5 0 1 1 10 0 5 5 0 0 1-10 0z"/></svg>' +
       '<input id="buscarC" type="text" placeholder="Buscar artículo…" value="' + esc(comprasBusqueda) + '"></div>' +
-      '<span class="muted nowrap">' + rank.length + ' artículos · ' + fmtInt(totalGen) + ' cajas en ' + meta.periodoMeses + ' meses</span></div>';
+      '<span class="muted nowrap">' + rank.length + ' artículos · promedio de los últimos ' + meta.periodoMeses + ' meses</span></div>';
 
     html += '<div class="card"><div class="table-wrap"><table class="table"><thead><tr>' +
-      '<th style="width:42px;">#</th><th>Artículo</th><th class="num">Total cajas</th>' +
-      '<th class="num">Cajas/mes</th><th class="num">Cajas/quincena</th><th style="width:150px;">Volumen</th>' +
+      '<th style="width:42px;">#</th><th>Artículo</th>' +
+      '<th class="num">Cajas/mes</th><th class="num">Cajas/quincena</th><th style="width:160px;">Volumen</th>' +
       '</tr></thead><tbody>';
     filt.forEach(function (x) {
       var a = x.articulo;
@@ -366,7 +365,6 @@
       html += '<tr data-ver="' + a.id + '" style="cursor:pointer;">' +
         '<td class="num muted">' + pos + '</td>' +
         '<td><div class="cell-art"><img src="' + fotoDe(a) + '" alt=""><div><div class="nm">' + esc(a.nombre) + '</div><div class="cd">' + esc(a.codigo || '') + '</div></div></div></td>' +
-        '<td class="num">' + fmtInt(x.total) + '</td>' +
         '<td class="num muted">' + fmtDec(x.promMes) + '</td>' +
         '<td class="num"><strong style="font-size:15px;">' + fmtDec(x.promQuincena) + '</strong></td>' +
         '<td><div class="bar"><div class="bar__fill fill-ok" style="width:' + pct + '%"></div></div></td>' +
@@ -465,7 +463,7 @@
       (a.descripcion ? '<p class="muted" style="margin-bottom:16px;line-height:1.5;">' + esc(a.descripcion) + '</p>' : '') +
       '<div class="callout" style="margin-bottom:14px;"><svg viewBox="0 0 24 24"><path d="M3 13h2v7H3zM10 8h2v12h-2zM17 4h2v16h-2z"/></svg>' +
       '<div>El cliente te compra en promedio <strong>' + fmtDec(S.promedioQuincena(a)) + ' cajas/quincena</strong> ' +
-      '(' + fmtDec(S.promedioMes(a)) + ' cajas/mes · ' + fmtInt(a.totalHistorico || 0) + ' cajas en ' + meta.periodoMeses + ' meses).</div></div>' +
+      '(' + fmtDec(S.promedioMes(a)) + ' cajas/mes, últimos ' + meta.periodoMeses + ' meses).</div></div>' +
       '<div class="stats" style="margin-bottom:8px;">' +
       miniStat('Stock actual', e === 'config' ? '—' : fmtInt(stock)) +
       miniStat('Stock máximo', a.stockMaximo ? fmtInt(a.stockMaximo) : '—') +
