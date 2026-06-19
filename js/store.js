@@ -392,20 +392,6 @@
     ['524', 'Sacacorcho de espumantes', 2]
   ];
 
-  // Ventas informadas por el cliente · 1ª quincena de junio 2026.
-  // [codigoDelCatalogo, cajasVendidas] (mapeo desde los códigos "L" del informe).
-  var VENTAS_JUNIO = [
-    ['031', 12], ['057', 4], ['222', 8], ['315', 6], ['395', 1], ['396', 3],
-    ['501', 29], ['502', 17], ['504', 28], ['505', 82], ['506', 36], ['507', 1],
-    ['508', 1], ['510', 48], ['512', 3], ['513', 32], ['518', 4], ['519', 5],
-    ['520', 5], ['521', 3], ['523', 5], ['525', 3], ['529E', 211], ['530', 2],
-    ['531', 1], ['539E', 12], ['540E', 3], ['542', 1], ['543', 3], ['544', 7],
-    ['546', 23], ['548', 3], ['551', 5], ['559', 5], ['560', 3], ['561', 1],
-    ['562', 9], ['564', 2], ['566E', 6], ['575', 1], ['577', 3], ['579', 2],
-    ['583E', 7], ['587', 1], ['589E', 7], ['598E', 6], ['932E', 3], ['934E', 2],
-    ['935E', 4], ['936E', 2], ['937E', 2], ['942E', 2]
-  ];
-
   // Construye el estado inicial con el catálogo real precargado.
   function seedReal() {
     var st = blank();
@@ -421,23 +407,10 @@
       st.articulos.push({
         id: 'a_' + codigo, codigo: codigo, nombre: nombre, descripcion: '',
         foto: placeholder(nombre), precio: 0,
-        stockInicial: max,                    // arranca "lleno" (= máximo)
+        stockInicial: 0,                      // stock real de hoy = 0 (se carga el real más adelante)
         stockMaximo: max,
-        puntoPedido: Math.round(promMes / 2), // repone al bajar de ~media quincena
+        puntoPedido: Math.round(promMes / 2), // referencia; el pedido repone hasta el máximo
         totalHistorico: total, activo: true
-      });
-    });
-    // Carga las ventas de la 1ª quincena de junio como movimientos de venta.
-    VENTAS_JUNIO.forEach(function (v) {
-      var codigo = v[0], qty = v[1];
-      if (qty <= 0) return;
-      var art = null;
-      for (var i = 0; i < st.articulos.length; i++) {
-        if (st.articulos[i].codigo === codigo) { art = st.articulos[i]; break; }
-      }
-      if (art) st.movimientos.push({
-        id: 'mv_' + codigo, articuloId: art.id, tipo: 'venta', cantidad: qty,
-        fecha: '2026-06-15', nota: 'Ventas 1ª quincena de junio'
       });
     });
     return st;

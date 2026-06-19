@@ -5,7 +5,7 @@
   'use strict';
 
   var S = window.Store;
-  var APP_VERSION = '1.0.5';
+  var APP_VERSION = '1.0.6';
 
   /* ---------- Estado de UI ---------- */
   var ui = {
@@ -18,6 +18,7 @@
     panel: { title: 'Panel', sub: 'Resumen general de tu stock rotativo' },
     compras: { title: 'Compra por quincena', sub: 'Promedio que te compra el cliente, de mayor a menor' },
     articulos: { title: 'Artículos', sub: 'Catálogo de productos en consignación' },
+    inicial: { title: 'Stock inicial', sub: 'Cargá el stock actual del cliente (punto de partida)' },
     ventas: { title: 'Cargar ventas', sub: 'Informe quincenal de ventas del cliente' },
     entregas: { title: 'Cargar entregas', sub: 'Mercadería que entregaste al cliente' },
     pedido: { title: 'Pedido sugerido', sub: 'Reposición automática según el stock' },
@@ -125,14 +126,15 @@
     updateBrand();
     var actions = '';
     if (ui.view === 'articulos') actions = btn('nuevo-art', 'primary', iconPlus(), 'Nuevo artículo');
+    else if (ui.view === 'inicial') actions = btn('guardar-inicial', 'primary', iconSave(), 'Guardar stock inicial');
     else if (ui.view === 'ventas') actions = btn('guardar-ventas', 'primary', iconSave(), 'Guardar informe');
     else if (ui.view === 'entregas') actions = btn('guardar-entregas', 'primary', iconSave(), 'Registrar entregas');
     else if (ui.view === 'pedido') actions = btn('print-sugerido', 'ghost', iconPrint(), 'Imprimir');
     $('#topbarActions').innerHTML = actions;
 
     var fn = ({
-      panel: renderPanel, compras: renderCompras, articulos: renderArticulos, ventas: renderVentas,
-      entregas: renderEntregas, pedido: renderPedido, movimientos: renderMovimientos, config: renderConfig
+      panel: renderPanel, compras: renderCompras, articulos: renderArticulos, inicial: renderInicial,
+      ventas: renderVentas, entregas: renderEntregas, pedido: renderPedido, movimientos: renderMovimientos, config: renderConfig
     })[ui.view];
     viewEl.innerHTML = fn ? fn() : '';
     if (afterRender[ui.view]) afterRender[ui.view]();
@@ -570,6 +572,59 @@
   }
 
   /* ============================================================
+     STOCK INICIAL (carga del stock actual del cliente)
+     ============================================================ */
+  function renderInicial() {
+    var arts = S.getArticulos({ soloActivos: true });
+    if (!arts.length) return emptyApp();
+
+    var html = '<div class="callout"><svg viewBox="0 0 24 24"><path d="M12 2a10 10 0 1 0 0 20 10 10 0 0 0 0-20zm1 15h-2v-6h2v6zm0-8h-2V7h2v2z"/></svg>' +
+      '<div>Cargá las <strong>cajas que el cliente tiene hoy</strong> de cada artículo. Es el punto de partida del stock; ' +
+      'después se suma lo que entregás y se resta lo que vende. Lo que dejes en 0 queda en 0.</div></div>';
+
+    html += '<div class="card" style="margin-top:18px;">';
+    html += '<div class="card__head"><h2>Stock inicial por artículo</h2><div class="spacer"></div>' +
+      '<div class="search" style="flex:none;width:240px;"><svg viewBox="0 0 24 24"><path d="M21 20l-5.6-5.6a7 7 0 1 0-1.4 1.4L20 21zM4 10a5 5 0 1 1 10 0 5 5 0 0 1-10 0z"/></svg>' +
+      '<input id="buscarIni" type="text" placeholder="Buscar artículo…"></div></div>';
+    html += '<div class="table-wrap"><table class="table"><thead><tr>' +
+      '<th>Artículo</th><th class="num">Stock máximo</th><th class="num">Stock hoy (cajas)</th>' +
+      '</tr></thead><tbody>';
+    arts.forEach(function (a) {
+      html += '<tr data-row-ini data-search="' + esc((a.nombre + ' ' + a.codigo).toLowerCase()) + '">' +
+        '<td><div class="cell-art"><img src="' + fotoDe(a) + '" alt=""><div><div class="nm">' + esc(a.nombre) + '</div><div class="cd">' + esc(a.codigo || '') + '</div></div></div></td>' +
+        '<td class="num muted">' + fmtInt(a.stockMaximo) + '</td>' +
+        '<td class="num"><input class="qty-input" type="number" min="0" step="1" value="' + (a.stockInicial || 0) + '" data-inicial="' + a.id + '"></td>' +
+        '</tr>';
+    });
+    html += '</tbody></table></div>';
+    html += '<div class="card__body" style="border-top:1px solid var(--line);"><div class="row" style="justify-content:flex-end;gap:10px;">' +
+      '<span class="muted" style="margin-right:auto;">' + arts.length + ' artículos</span>' +
+      btn('guardar-inicial', 'primary', iconSave(), 'Guardar stock inicial') + '</div></div>';
+    html += '</div>';
+    return html;
+  }
+  afterRender.inicial = function () {
+    var b = $('#buscarIni');
+    if (b) b.addEventListener('input', function () {
+      var q = b.value.toLowerCase();
+      $$('[data-row-ini]').forEach(function (tr) {
+        tr.style.display = (!q || tr.getAttribute('data-search').indexOf(q) >= 0) ? '' : 'none';
+      });
+    });
+  };
+  function guardarInicial() {
+    var n = 0;
+    $$('[data-inicial]').forEach(function (inp) {
+      var id = inp.getAttribute('data-inicial');
+      var val = Math.max(0, Math.round(parseFloat(inp.value) || 0));
+      var a = S.getArticulo(id);
+      if (a && (a.stockInicial || 0) !== val) { S.updateArticulo(id, { stockInicial: val }); n++; }
+    });
+    toast(n ? 'Stock inicial guardado (' + n + ' artículos)' : 'No hubo cambios', n ? 'ok' : 'info');
+    render();
+  }
+
+  /* ============================================================
      PEDIDO SUGERIDO
      ============================================================ */
   function renderPedido() {
@@ -930,6 +985,7 @@
     else if (act === 'guardar-entregas') guardarCarga(false);
     else if (act === 'demo') cargarDemo();
     else if (act === 'print-sugerido') imprimirSugerido();
+    else if (act === 'guardar-inicial') guardarInicial();
   });
 
   /* ---------- Init ---------- */
