@@ -10,7 +10,7 @@
   // fusiona (merge) en los navegadores existentes: actualiza nombres, totales y
   // máximos y agrega artículos nuevos, SIN borrar movimientos, pedidos ni el
   // stock real ya cargado (ver mergeSeed).
-  var SEED_VERSION = 9;
+  var SEED_VERSION = 10;
   // Versión del "stock inicial" precargado (columna Existencia). Al subirla, el
   // stock inicial real se reaplica una vez aunque ya haya movimientos (corrección
   // de baseline). Después vuelve a protegerse. Ver mergeSeed.
@@ -593,8 +593,10 @@
   function resetAll() { state = blank(); save(); }
 
   /* ---------- Catálogo real (Loekemeyer · cliente Osa Distribuidora SRL) ----------
-     [codigo, nombre, totalHistorico]  ·  ordenado por total (mayor a menor).
-     El total abarca ~periodoMeses meses (ver meta.periodoMeses). */
+     [codigo, nombre, ventasRanking]  ·  ordenado por total (mayor a menor).
+     OJO: el ranking viene EN CAJAS (informe de ventas de OSA). En el seed se
+     convierte a UNIDADES (× Uni×Caja) para que el promedio mensual quede en la
+     unidad canónica. El total abarca ~periodoMeses meses (ver meta.periodoMeses). */
   var CATALOGO = [
     ['505', 'Pelador mango plástico', 6365],
     ['513', 'Pelador mango metálico', 4075],
@@ -743,13 +745,14 @@
     st.meta.seedVersion = SEED_VERSION;
     st.meta.stockBaseline = STOCK_BASELINE;
     CATALOGO.forEach(function (row) {
-      var codigo = row[0], nombre = row[1], total = row[2];
+      var codigo = row[0], nombre = row[1], totalCajas = row[2];
+      var uxc = uxcSeed(codigo);    // unidades por caja (Uni×Caja)
       st.articulos.push({
         id: 'a_' + codigo, codigo: codigo, nombre: nombre, descripcion: '',
         foto: placeholder(nombre), precio: 0,
         stockInicial: STOCK_INICIAL[codigo] || 0, // stock real del cliente EN UNIDADES (Existencia, informe 23/06/26)
-        totalHistorico: total,        // ventas conocidas (unidades) en periodoMeses (base del promedio mensual)
-        uxc: uxcSeed(codigo),         // unidades por caja (para mostrar en cajas / normalizar imports)
+        totalHistorico: totalCajas * uxc, // ventas conocidas EN UNIDADES (el ranking viene EN CAJAS → × Uni×Caja)
+        uxc: uxc,                     // unidades por caja (para mostrar en cajas / normalizar imports)
         promedioManual: null,         // sin override: usa el promedio automático
         mesesPedido: null,            // sin override: usa meta.mesesPedidoDefault
         activo: true
