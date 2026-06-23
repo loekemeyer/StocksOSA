@@ -564,7 +564,7 @@
         '<td class="muted">' + fmtFecha(q.desde) + ' a ' + fmtFecha(q.hasta) + '</td>' +
         '<td>' + (c ? '<span class="badge badge--ok"><span class="dot"></span>Cargada</span>' : '<span class="badge badge--warn"><span class="dot"></span>Pendiente</span>') + '</td>' +
         '<td class="num">' + (c ? '<strong>' + fmtInt(total) + '</strong> <span class="muted">(' + c.count + ' art.)</span>' : '—') + '</td>' +
-        '<td class="right">' + (c ? '' : btn('importar-ventas', 'ghost btn--sm', iconUpload(), 'Importar')) + '</td>' +
+        '<td class="right">' + (c ? '' : btn('importar-ventas', 'ghost btn--sm', iconUpload(), 'Importar', 'data-quincena="' + q.key + '"')) + '</td>' +
         '</tr>';
     });
     html += '</tbody></table></div></div>';
@@ -610,7 +610,7 @@
         }, Promise.resolve(''));
       });
   }
-  function openImportVentas() {
+  function openImportVentas(quincenaPref) {
     var body = '<div class="form">' +
       '<div class="imgdrop" id="impDrop" style="cursor:pointer;">' +
       '<div class="imgdrop__text"><strong>Subir PDF del informe</strong><span id="impFileName">PDF con texto seleccionable (no foto escaneada).</span></div>' +
@@ -631,10 +631,10 @@
       var pegado = $('#impText').value;
       if (f && /pdf/i.test((f.type || '') + ' ' + f.name)) {
         toast('Leyendo PDF…', 'info');
-        pdfATexto(f).then(function (txt) { previewImport(txt); })
+        pdfATexto(f).then(function (txt) { previewImport(txt, quincenaPref); })
           .catch(function () { toast('No se pudo leer el PDF. Pegá el texto del informe.', 'danger'); });
       } else if (pegado.trim()) {
-        previewImport(pegado);
+        previewImport(pegado, quincenaPref);
       } else if (f) {
         toast('Por ahora subí un PDF con texto, o pegá el texto. Las fotos necesitan OCR.', 'warn');
       } else {
@@ -642,7 +642,7 @@
       }
     });
   }
-  function previewImport(text) {
+  function previewImport(text, quincenaPref) {
     var r = S.parseReporteVentas(text);
     if (!r.filas.length) { toast('No reconocí filas en el informe. Revisá el texto.', 'danger'); return; }
     var hoy = S.hoyISO();
@@ -670,10 +670,11 @@
         '<td class="num"><strong>' + (ok ? fmtInt(d.cajas) : '—') + '</strong></td></tr>';
     }).join('');
 
-    // Quincena a la que se imputa (default: la del fin del informe).
-    var qDef = S.quincenaDe(fechaRep) || S.quincenaDe(hoy);
+    // Quincena a la que se imputa (default: la pasada desde Cargas, o la del fin del informe).
+    var qDef = (quincenaPref && qObj(quincenaPref)) || S.quincenaDe(fechaRep) || S.quincenaDe(hoy);
     var quincenas = S.listaQuincenas(r.periodo.desde || fechaRep, hoy > fechaRep ? hoy : fechaRep);
     if (!quincenas.some(function (q) { return q.key === qDef.key; })) quincenas.push(qDef);
+    quincenas.sort(function (a, b) { return a.key < b.key ? -1 : 1; });
     var optsQ = quincenas.map(function (q) {
       return '<option value="' + q.key + '"' + (q.key === qDef.key ? ' selected' : '') + '>' +
         esc(q.label) + (S.quincenaCargada(q.key) ? ' — ya cargada' : '') + '</option>';
@@ -1078,7 +1079,7 @@
     else if (act === 'print-sugerido') imprimirSugerido();
     else if (act === 'guardar-punto') guardarPunto();
     else if (act === 'nuevo-ajuste') openAjuste();
-    else if (act === 'importar-ventas') openImportVentas();
+    else if (act === 'importar-ventas') openImportVentas(t.getAttribute('data-quincena') || null);
     else if (act === 'importar-entregas') openImportEntregas();
     else if (act === 'ir-cargas') setView('cargas');
     else if (act === 'toggle-unit') {
