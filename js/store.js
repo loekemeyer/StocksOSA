@@ -10,7 +10,7 @@
   // fusiona (merge) en los navegadores existentes: actualiza nombres, totales y
   // máximos y agrega artículos nuevos, SIN borrar movimientos, pedidos ni el
   // stock real ya cargado (ver mergeSeed).
-  var SEED_VERSION = 9;
+  var SEED_VERSION = 10;
   // Versión del "stock inicial" precargado (columna Existencia). Al subirla, el
   // stock inicial real se reaplica una vez aunque ya haya movimientos (corrección
   // de baseline). Después vuelve a protegerse. Ver mergeSeed.
@@ -18,7 +18,7 @@
   // Artículos duplicados (mismo producto con código base y +E) que deben quedar
   // como uno solo: [idDuplicado, idCanónico]. Al fusionar se mueven los
   // movimientos y se suma el stock inicial al canónico. Ver mergeSeed.
-  var FUSIONAR = [['a_580', 'a_580E'], ['a_525', 'a_525E']];
+  var FUSIONAR = [['a_580', 'a_580E'], ['a_525', 'a_525E'], ['a_478E', 'a_529E']];
   // Handler opcional que registra la capa de UI para avisar si falla un guardado
   // (p. ej. localStorage lleno). Ver setSaveErrorHandler.
   var onSaveError = null;
@@ -619,7 +619,7 @@
     ['520', 'Sacacorcho tipo mozo cromado', 397],
     ['512', 'Abrelatas mariposa capuchón rojo', 390],
     ['523', 'Sacacorcho doble aleta', 380],
-    ['529E', 'Sacacorcho doble impulso acero', 319],
+    ['529E', 'Sacacorcho doble impulso acero', 344], // 478E y 529E son el mismo artículo: se consolidan (319 + 25)
     ['315', 'Pisa papas acero inox', 307],
     ['530', 'Sacacorcho tipo mozo color', 284],
     ['521', 'Sacacorcho combinado cromado', 278],
@@ -662,7 +662,6 @@
     ['937E', 'Batidor pera nylon mango madera', 30],
     ['583E', 'Especiero tapa bamboo', 30],
     ['396', 'Enrulador de manteca', 25],
-    ['478E', 'Sacacorcho doble impulso', 25],
     ['570', 'Pala de canelones', 23],
     ['561', 'Pinza grande alambre', 22],
     ['596', 'Pinza de ensalada mango plástico 23cm', 22],
@@ -712,10 +711,10 @@
   // 525 y 580 se consolidan en su variante E. Lo que figura en blanco queda en 0.
   // 517 y 946 se agregaron al catálogo (no tenían historial de ventas).
   var STOCK_INICIAL = {
-    '031': 2112, '222': 32, '315': 18, '395': 144, '396': 6, '478E': 13, '501': 1020,
+    '031': 2112, '222': 32, '315': 18, '395': 144, '396': 6, '501': 1020,
     '502': 780, '504': 1343, '505': 6108, '506': 2268, '507': 24, '508': 100, '510': 1044,
     '511': 11, '512': 2, '513': 5364, '515': 48, '518': 474, '519': 1220, '520': 150,
-    '521': 336, '522E': 4, '523': 218, '525E': 149, '529E': 88, '530': 252, '531': 360,
+    '521': 336, '522E': 4, '523': 218, '525E': 149, '529E': 101, '530': 252, '531': 360, // 529E incluye el stock de 478E (88 + 13)
     '536E': 18, '540E': 17, '542': 185, '543': 84, '544': 677, '546': 660, '548': 23,
     '551': 2, '559': 96, '560': 4, '561': 4, '562': 276, '564': 9, '566E': 386, '569': 12,
     '570': 14, '574E': 60, '577': 3, '579': 19, '580E': 12, '583E': 16, '587': 491,
@@ -735,7 +734,13 @@
     '543': 12, '544': 12, '546': 12, '548': 24, '551': 12, '559': 12, '562': 12,
     '564': 12, '566E': 6, '575': 12, '577': 12, '579': 12, '580E': 12, '583E': 15,
     '931E': 12, '932E': 12, '933E': 12, '934E': 12, '935E': 12, '936E': 12,
-    '937E': 12, '941E': 12, '942E': 12, '945E': 12, '946E': 12, '948E': 12
+    '937E': 12, '941E': 12, '942E': 12, '945E': 12, '946E': 12, '948E': 12,
+    // UxB del sitio loekemeyer.com (cargadas a mano).
+    '057': 12, '222': 12, '229': 12, '325': 24, '328E': 12, '360E': 12, '361E': 12,
+    '511': 12, '512': 12, '522E': 12, '536E': 12, '538E': 12, '539E': 12,
+    '540E': 12, '560': 12, '561': 12, '569': 12, '570': 24, '581': 12, '585E': 12,
+    '586': 12, '587': 12, '589E': 24, '591': 12, '594': 12, '595': 12, '596': 12,
+    '598E': 12, '809E': 12, '811E': 12, '817E': 12, '943E': 12, '944E': 12
   };
   // uxc del catálogo: exacto, +E y -E (catálogo 946 <-> informe 946E). 0 si no se
   // conoce: el artículo queda sin Uni×Caja real y uxcDe aplica el mínimo (UXC_MIN).
