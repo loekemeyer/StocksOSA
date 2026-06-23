@@ -1,29 +1,32 @@
 /* ============================================================
-   StockRotativo · Interfaz y navegación
+   StockRotativo · Interfaz y navegación (5 módulos)
+   1 Stocks · 2 Movimientos · 3 Punto de pedido · 4 Entregas Loeke · 5 Ventas OSA
    ============================================================ */
 (function () {
   'use strict';
 
   var S = window.Store;
-  var APP_VERSION = '1.0.9';
+  var APP_VERSION = '1.1.0';
 
   /* ---------- Estado de UI ---------- */
   var ui = {
-    view: 'panel',
-    busqueda: '',
-    filtro: 'todos' // todos | bajo | ok
+    view: 'stocks',
+    busqueda: '',   // buscador de Stocks
+    filtro: 'todos', // todos | reponer | ok
+    qPunto: '',     // buscador de Punto de pedido
+    expanded: {},   // artículos expandidos en Movimientos
+    movDesde: '',   // filtro de período (detalle de Movimientos)
+    movHasta: ''
   };
+  var pendingExpand = null; // artículo a expandir al entrar a Movimientos
 
   var VIEWS = {
-    panel: { title: 'Panel', sub: 'Resumen general de tu stock rotativo' },
-    compras: { title: 'Compra por quincena', sub: 'Promedio que te compra el cliente, de mayor a menor' },
-    articulos: { title: 'Artículos', sub: 'Catálogo de productos en consignación' },
-    inicial: { title: 'Stock inicial', sub: 'Cargá el stock actual del cliente (punto de partida)' },
-    ventas: { title: 'Cargar ventas', sub: 'Informe quincenal de ventas del cliente' },
-    entregas: { title: 'Cargar entregas', sub: 'Mercadería que entregaste al cliente' },
-    pedido: { title: 'Pedido sugerido', sub: 'Reposición automática según el stock' },
-    movimientos: { title: 'Movimientos', sub: 'Historial de entregas, ventas y ajustes' },
-    config: { title: 'Configuración', sub: 'Datos, respaldo y preferencias' }
+    stocks:      { title: 'Stocks', sub: 'Stock de hoy y pedido sugerido por artículo' },
+    movimientos: { title: 'Movimientos', sub: 'Inicial + entregas − ventas = stock hoy. Tocá un artículo para ver el detalle.' },
+    puntopedido: { title: 'Punto de pedido', sub: 'Promedio de ventas × meses de cobertura = punto de pedido' },
+    entregas:    { title: 'Entregas Loeke', sub: 'Mercadería que Loeke entrega a OSA (entra al stock)' },
+    ventas:      { title: 'Ventas OSA', sub: 'Ventas de OSA a sus clientes (salen del stock)' },
+    config:      { title: 'Configuración', sub: 'Datos, respaldo y preferencias' }
   };
 
   /* ---------- Atajos DOM ---------- */
@@ -38,10 +41,8 @@
       .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
       .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
   }
-  // Sin separadores de miles ni comas (números "planos"). Sin decimales (redondeado).
+  // Números "planos", sin separadores ni decimales (redondeado).
   function fmtInt(n) { return String(Math.round(n || 0)); }
-  // Alias histórico: los promedios también se muestran redondeados (sin decimales).
-  function fmtDec(n) { return fmtInt(n); }
   function fmtMoney(n) {
     var m = S.getMeta().moneda || 'ARS';
     try { return new Intl.NumberFormat('es-AR', { style: 'currency', currency: m, maximumFractionDigits: 0 }).format(n || 0); }
@@ -53,8 +54,7 @@
     if (p.length !== 3) return iso;
     return p[2] + '/' + p[1] + '/' + p[0];
   }
-  // Se escapa: la foto puede venir de un respaldo importado y se interpola
-  // directamente en src="...". Sin escapar sería una vía de inyección.
+  // La foto se escapa: puede venir de un respaldo importado y se interpola en src="...".
   function fotoDe(a) { return esc(a.foto || S.placeholder(a.nombre)); }
 
   /* ---------- Toast ---------- */
@@ -97,7 +97,7 @@
 
   /* ---------- Navegación ---------- */
   function setView(v) {
-    if (!VIEWS[v]) v = 'panel';
+    if (!VIEWS[v]) v = 'stocks';
     ui.view = v;
     $$('.nav__item').forEach(function (el) {
       el.classList.toggle('is-active', el.getAttribute('data-view') === v);
@@ -128,16 +128,16 @@
     updateBadge();
     updateBrand();
     var actions = '';
-    if (ui.view === 'articulos') actions = btn('nuevo-art', 'primary', iconPlus(), 'Nuevo artículo');
-    else if (ui.view === 'inicial') actions = btn('guardar-inicial', 'primary', iconSave(), 'Guardar stock inicial');
-    else if (ui.view === 'ventas') actions = btn('guardar-ventas', 'primary', iconSave(), 'Guardar informe');
+    if (ui.view === 'stocks') actions = btn('nuevo-art', 'primary', iconPlus(), 'Nuevo artículo') + btn('print-sugerido', 'ghost', iconPrint(), 'Imprimir sugerido');
+    else if (ui.view === 'movimientos') actions = btn('nuevo-ajuste', 'ghost', iconPlus(), 'Ajuste manual');
+    else if (ui.view === 'puntopedido') actions = btn('guardar-punto', 'primary', iconSave(), 'Guardar');
     else if (ui.view === 'entregas') actions = btn('guardar-entregas', 'primary', iconSave(), 'Registrar entregas');
-    else if (ui.view === 'pedido') actions = btn('print-sugerido', 'ghost', iconPrint(), 'Imprimir');
+    else if (ui.view === 'ventas') actions = btn('guardar-ventas', 'primary', iconSave(), 'Guardar ventas');
     $('#topbarActions').innerHTML = actions;
 
     var fn = ({
-      panel: renderPanel, compras: renderCompras, articulos: renderArticulos, inicial: renderInicial,
-      ventas: renderVentas, entregas: renderEntregas, pedido: renderPedido, movimientos: renderMovimientos, config: renderConfig
+      stocks: renderStocks, movimientos: renderMovimientos, puntopedido: renderPunto,
+      entregas: renderEntregas, ventas: renderVentas, config: renderConfig
     })[ui.view];
     viewEl.innerHTML = fn ? fn() : '';
     if (afterRender[ui.view]) afterRender[ui.view]();
@@ -151,72 +151,27 @@
   function iconPlus() { return '<svg viewBox="0 0 24 24"><path d="M11 5h2v6h6v2h-6v6h-2v-6H5v-2h6z"/></svg>'; }
   function iconSave() { return '<svg viewBox="0 0 24 24"><path d="M17 3H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V7l-4-4zm-5 16a3 3 0 1 1 0-6 3 3 0 0 1 0 6zm3-10H5V5h10v4z"/></svg>'; }
   function iconPrint() { return '<svg viewBox="0 0 24 24"><path d="M19 8H5a3 3 0 0 0-3 3v6h4v4h12v-4h4v-6a3 3 0 0 0-3-3zm-3 11H8v-5h8v5zm3-7a1 1 0 1 1 0-2 1 1 0 0 1 0 2zM18 3H6v4h12V3z"/></svg>'; }
+  function iconBox() { return '<svg viewBox="0 0 24 24"><path d="M12 2 3 7v10l9 5 9-5V7l-9-5zm0 2.3L18.5 8 12 11.7 5.5 8 12 4.3z"/></svg>'; }
+  function iconLayers() { return '<svg viewBox="0 0 24 24"><path d="M12 2 2 7l10 5 10-5-10-5zm0 9L4.2 7 12 4.3 19.8 7 12 11zM2 12l10 5 10-5 2 1-12 6L0 13l2-1z"/></svg>'; }
+  function iconBell() { return '<svg viewBox="0 0 24 24"><path d="M12 22a2.5 2.5 0 0 0 2.45-2h-4.9A2.5 2.5 0 0 0 12 22zm6-6V11a6 6 0 0 0-5-5.9V4a1 1 0 1 0-2 0v1.1A6 6 0 0 0 6 11v5l-2 2v1h16v-1l-2-2z"/></svg>'; }
+  function iconCart() { return '<svg viewBox="0 0 24 24"><path d="M7 18a2 2 0 1 0 0 4 2 2 0 0 0 0-4zm10 0a2 2 0 1 0 0 4 2 2 0 0 0 0-4zM6.2 4l.9 2H20a1 1 0 0 1 1 1.3l-2.4 8.3A2 2 0 0 1 16.6 17H8.5a2 2 0 0 1-1.9-1.5L4.3 6.5 3.6 4z"/></svg>'; }
 
-  /* ============================================================
-     PANEL
-     ============================================================ */
-  function renderPanel() {
-    var arts = S.getArticulos({ soloActivos: true });
-    var stocks = S.computeStocks();
-    if (!arts.length) return emptyApp();
-
-    var unidades = 0, valor = 0, alertas = 0, sinStock = 0;
-    arts.forEach(function (a) {
-      var s = stocks[a.id];
-      unidades += Math.max(0, s);
-      valor += Math.max(0, s) * (a.precio || 0);
-      var e = S.estado(a, s);
-      if (e === 'bajo' || e === 'sin') alertas++;
-      if (e === 'sin') sinStock++;
-    });
-    var sug = S.pedidoSugerido();
-    var unidadesPedido = sug.reduce(function (acc, x) { return acc + x.sugerido; }, 0);
-
-    var html = '';
-    html += '<div class="stats">';
-    html += stat('primary', iconBox(), 'Artículos activos', fmtInt(arts.length), 'en consignación');
-    html += stat('ok', iconLayers(), 'Cajas en stock', fmtInt(unidades), valor > 0 ? fmtMoney(valor) + ' en mercadería' : 'en el cliente');
-    html += stat(sug.length ? 'warn' : 'ok', iconBell(), 'Para reponer', fmtInt(sug.length), sug.length ? 'artículos a reponer' : 'todo al máximo');
-    html += stat(sinStock ? 'danger' : 'primary', iconCart(), 'Pedido sugerido', fmtInt(unidadesPedido), sinStock ? sinStock + ' sin stock' : 'cajas a reponer');
-    html += '</div>';
-
-    html += '<div class="grid-2">';
-    // Alertas
-    html += '<div class="card"><div class="card__head"><h2>Necesita reposición</h2><div class="spacer"></div>';
-    if (sug.length) html += btn('ir-pedido', 'ghost btn--sm', '', 'Ver pedido');
-    html += '</div><div class="card__body">';
-    if (!sug.length) {
-      html += '<div class="callout"><svg viewBox="0 0 24 24"><path d="M9 16.2 4.8 12l-1.4 1.4L9 19 21 7l-1.4-1.4z"/></svg>' +
-        '<div>Todos los artículos están por encima de su punto de pedido. ¡No hay nada que reponer por ahora!</div></div>';
-    } else {
-      html += '<ul class="list-reset">';
-      sug.slice(0, 6).forEach(function (x) {
-        var a = x.articulo;
-        html += '<li class="timeline-item">' +
-          '<img class="cell-art-img" src="' + fotoDe(a) + '" alt="" style="width:40px;height:40px;border-radius:9px;object-fit:cover;flex:none;">' +
-          '<div class="timeline-main"><div class="ttl">' + esc(a.nombre) + '</div>' +
-          '<div class="sub">Stock: <strong>' + fmtInt(x.stock) + '</strong> · Punto: ' + fmtInt(a.puntoPedido) + ' · Máx: ' + fmtInt(a.stockMaximo) + '</div></div>' +
-          '<div class="timeline-qty badge badge--warn">+' + fmtInt(x.sugerido) + '</div></li>';
-      });
-      html += '</ul>';
-    }
-    html += '</div></div>';
-
-    // Actividad reciente
-    var movs = S.getMovimientos().slice(0, 7);
-    html += '<div class="card"><div class="card__head"><h2>Actividad reciente</h2><div class="spacer"></div>';
-    if (movs.length) html += btn('ir-movimientos', 'ghost btn--sm', '', 'Ver todo');
-    html += '</div><div class="card__body">';
-    if (!movs.length) html += '<p class="muted text-c" style="padding:18px 0;">Todavía no hay movimientos registrados.</p>';
-    else { html += '<ul class="list-reset">'; movs.forEach(function (m) { html += movItem(m); }); html += '</ul>'; }
-    html += '</div></div>';
-    html += '</div>';
-    return html;
+  function badgeEstado(e) {
+    if (e === 'sin') return '<span class="badge badge--danger"><span class="dot"></span>Sin stock</span>';
+    if (e === 'bajo') return '<span class="badge badge--warn"><span class="dot"></span>Para reponer</span>';
+    return '<span class="badge badge--ok"><span class="dot"></span>En nivel</span>';
   }
-  afterRender.panel = function () {
-    bindAction('ir-pedido', function () { location.hash = '#/pedido'; });
-    bindAction('ir-movimientos', function () { location.hash = '#/movimientos'; });
-  };
+
+  function emptyApp() {
+    return '<div class="card"><div class="card__body"><div class="empty">' +
+      '<div class="empty__ic">' + iconBox() + '</div>' +
+      '<h3>No hay artículos cargados</h3>' +
+      '<p>Creá tu primer artículo o cargá el catálogo de ejemplo (Loekemeyer · OSA) para empezar.</p>' +
+      '<div class="row" style="justify-content:center;">' +
+      btn('nuevo-art', 'primary', iconPlus(), 'Crear artículo') +
+      btn('demo', 'ghost', '', 'Cargar catálogo de ejemplo') +
+      '</div></div></div></div>';
+  }
 
   function stat(tone, icon, label, value, hint) {
     return '<div class="stat tone-' + tone + '"><div class="stat__ic">' + icon + '</div>' +
@@ -224,299 +179,303 @@
       '<div class="stat__value">' + value + '</div>' +
       '<div class="stat__hint">' + esc(hint) + '</div></div>';
   }
-  function iconBox() { return '<svg viewBox="0 0 24 24"><path d="M12 2 3 7v10l9 5 9-5V7l-9-5zm0 2.3L18.5 8 12 11.7 5.5 8 12 4.3z"/></svg>'; }
-  function iconLayers() { return '<svg viewBox="0 0 24 24"><path d="M12 2 2 7l10 5 10-5-10-5zm0 9L4.2 7 12 4.3 19.8 7 12 11zM2 12l10 5 10-5 2 1-12 6L0 13l2-1zm0 5 10 5 10-5 2 1-12 6L0 18l2-1z"/></svg>'; }
-  function iconBell() { return '<svg viewBox="0 0 24 24"><path d="M12 22a2.5 2.5 0 0 0 2.45-2h-4.9A2.5 2.5 0 0 0 12 22zm6-6V11a6 6 0 0 0-5-5.9V4a1 1 0 1 0-2 0v1.1A6 6 0 0 0 6 11v5l-2 2v1h16v-1l-2-2z"/></svg>'; }
-  function iconCart() { return '<svg viewBox="0 0 24 24"><path d="M7 18a2 2 0 1 0 0 4 2 2 0 0 0 0-4zm10 0a2 2 0 1 0 0 4 2 2 0 0 0 0-4zM6.2 4l.9 2H20a1 1 0 0 1 1 1.3l-2.4 8.3A2 2 0 0 1 16.6 17H8.5a2 2 0 0 1-1.9-1.5L4.3 6.5 3.6 4z"/></svg>'; }
-
-  function movItem(m) {
-    var a = S.getArticulo(m.articuloId);
-    var nombre = a ? a.nombre : '(artículo eliminado)';
-    var t = m.tipo;
-    var cls = t === 'entrega' ? 't-entrega' : (t === 'venta' ? 't-venta' : 't-ajuste');
-    var ic = t === 'entrega'
-      ? '<svg viewBox="0 0 24 24"><path d="M12 4v10l4-4 1.4 1.4L12 17 5.6 11.4 7 10l4 4V4z" transform="rotate(180 12 12)"/></svg>'
-      : (t === 'venta'
-        ? '<svg viewBox="0 0 24 24"><path d="M12 4v10l4-4 1.4 1.4L12 17 5.6 11.4 7 10l4 4V4z"/></svg>'
-        : '<svg viewBox="0 0 24 24"><path d="M3 17v2h6v-2H3zM3 5v2h10V5H3zm10 16v-2h8v-2h-8v-2h-2v6h2zM7 9v2H3v2h4v2h2V9H7zm14 4v-2H11v2h10zm-6-4h2V7h4V5h-4V3h-2v6z"/></svg>');
-    var signo = t === 'venta' ? '−' : (t === 'ajuste' && m.cantidad < 0 ? '−' : '+');
-    var color = t === 'entrega' ? 'badge--ok' : (t === 'venta' ? 'badge--primary' : 'badge--warn');
-    var label = t === 'entrega' ? 'Entrega' : (t === 'venta' ? 'Venta' : 'Ajuste');
-    return '<li class="timeline-item"><div class="timeline-dot ' + cls + '">' + ic + '</div>' +
-      '<div class="timeline-main"><div class="ttl">' + esc(nombre) + '</div>' +
-      '<div class="sub">' + label + ' · ' + fmtFecha(m.fecha) + (m.nota ? ' · ' + esc(m.nota) : '') + '</div></div>' +
-      '<div class="timeline-qty badge ' + color + '">' + signo + fmtInt(Math.abs(m.cantidad)) + '</div></li>';
-  }
-
-  function emptyApp() {
-    return '<div class="card"><div class="card__body"><div class="empty">' +
-      '<div class="empty__ic">' + iconBox() + '</div>' +
-      '<h3>Empecemos a cargar tu stock</h3>' +
-      '<p>Todavía no cargaste artículos. Creá tu primer producto con foto y stock, o cargá datos de ejemplo para ver cómo funciona.</p>' +
-      '<div class="row" style="justify-content:center;">' +
-      btn('nuevo-art', 'primary', iconPlus(), 'Crear artículo') +
-      btn('demo', 'ghost', '', 'Cargar datos de ejemplo') +
-      '</div></div></div></div>';
-  }
 
   /* ============================================================
-     ARTÍCULOS
+     MÓDULO 1 · STOCKS
      ============================================================ */
-  function renderArticulos() {
-    var arts = S.getArticulos();
+  function renderStocks() {
+    var arts = S.getArticulos({ soloActivos: true });
     if (!arts.length) return emptyApp();
     var stocks = S.computeStocks();
 
-    var html = '<div class="toolbar">' +
+    var unidades = 0, valor = 0, sug = S.pedidoSugerido();
+    var cajasPedido = sug.reduce(function (acc, x) { return acc + x.sugerido; }, 0);
+    arts.forEach(function (a) {
+      var s = Math.max(0, stocks[a.id]);
+      unidades += s; valor += s * (a.precio || 0);
+    });
+
+    var html = '<div class="stats">';
+    html += stat('primary', iconBox(), 'Artículos', fmtInt(arts.length), 'activos');
+    html += stat('ok', iconLayers(), 'Cajas en stock', fmtInt(unidades), valor > 0 ? fmtMoney(valor) : 'en el cliente');
+    html += stat(sug.length ? 'warn' : 'ok', iconBell(), 'Para reponer', fmtInt(sug.length), sug.length ? 'artículos' : 'todo en nivel');
+    html += stat(cajasPedido ? 'danger' : 'primary', iconCart(), 'Cajas a pedir', fmtInt(cajasPedido), 'pedido sugerido');
+    html += '</div>';
+
+    html += '<div class="toolbar">' +
       '<div class="search"><svg viewBox="0 0 24 24"><path d="M21 20l-5.6-5.6a7 7 0 1 0-1.4 1.4L20 21zM4 10a5 5 0 1 1 10 0 5 5 0 0 1-10 0z"/></svg>' +
       '<input id="buscar" type="text" placeholder="Buscar por nombre o código…" value="' + esc(ui.busqueda) + '"></div>' +
       '<div class="chips">' +
-      chip('todos', 'Todos') + chip('bajo', 'Para reponer') + chip('ok', 'En nivel') +
+      chip('todos', 'Todos') + chip('reponer', 'Para reponer') + chip('ok', 'En nivel') +
       '</div></div>';
 
-    var filtrados = arts.filter(function (a) {
-      var q = ui.busqueda.toLowerCase();
-      var match = !q || (a.nombre + ' ' + a.codigo).toLowerCase().indexOf(q) >= 0;
-      if (!match) return false;
-      if (ui.filtro === 'todos') return true;
-      var e = S.estado(a, stocks[a.id]);
-      if (ui.filtro === 'bajo') return e === 'bajo' || e === 'sin';
-      if (ui.filtro === 'ok') return e === 'ok';
-      return true;
+    html += '<div class="card"><div class="table-wrap"><table class="table"><thead><tr>' +
+      '<th>Artículo</th><th class="num">Stock hoy</th><th class="num">Punto de pedido</th>' +
+      '<th class="num">Sugerido</th><th>Estado</th></tr></thead><tbody>';
+    arts.forEach(function (a) {
+      var s = stocks[a.id];
+      var pp = S.puntoPedido(a);
+      var sg = S.sugerido(a, s);
+      var e = S.estado(a, s);
+      var clase = sg > 0 ? 'reponer' : 'ok';
+      html += '<tr data-art="' + a.id + '" data-clase="' + clase + '" ' +
+        'data-search="' + esc((a.nombre + ' ' + (a.codigo || '')).toLowerCase()) + '" style="cursor:pointer;">' +
+        '<td><div class="cell-art"><img src="' + fotoDe(a) + '" alt=""><div><div class="nm">' + esc(a.nombre) + '</div><div class="cd">' + esc(a.codigo || '') + '</div></div></div></td>' +
+        '<td class="num"><strong>' + fmtInt(s) + '</strong></td>' +
+        '<td class="num muted">' + fmtInt(pp) + '</td>' +
+        '<td class="num">' + (sg > 0 ? '<span class="badge badge--warn">+' + fmtInt(sg) + '</span>' : '—') + '</td>' +
+        '<td>' + badgeEstado(e) + '</td>' +
+        '</tr>';
     });
-
-    if (!filtrados.length) {
-      html += '<div class="card"><div class="card__body"><p class="muted text-c" style="padding:30px 0;">No se encontraron artículos con ese filtro.</p></div></div>';
-      return html;
-    }
-
-    html += '<div class="grid">';
-    filtrados.forEach(function (a) { html += articleCard(a, stocks[a.id]); });
-    html += '</div>';
+    html += '</tbody></table></div></div>';
     return html;
   }
   function chip(val, label) {
     return '<button class="chip ' + (ui.filtro === val ? 'is-active' : '') + '" data-chip="' + val + '">' + esc(label) + '</button>';
   }
-  function articleCard(a, stock) {
-    var e = S.estado(a, stock);
-    var isConfig = e === 'config';
-    var pct = (!isConfig && a.stockMaximo > 0) ? Math.min(100, Math.max(0, (stock / a.stockMaximo) * 100)) : 0;
-    var fill = e === 'sin' ? 'fill-danger' : (e === 'bajo' ? 'fill-warn' : 'fill-ok');
-    var flag = isConfig ? '<span class="article-card__flag" style="background:rgba(107,115,144,.92);color:#fff;">A configurar</span>'
-      : (e === 'sin' ? '<span class="article-card__flag flag-danger">Sin stock</span>'
-        : (e === 'bajo' ? '<span class="article-card__flag flag-warn">Reponer</span>'
-          : '<span class="article-card__flag flag-ok">En nivel</span>'));
-    var stockLine = isConfig
-      ? '<div class="stock-row"><span class="now" style="color:var(--muted-2);">—</span>' +
-        '<span class="max">≈ ' + fmtDec(S.promedioQuincena(a)) + ' cajas/quincena</span></div>' +
-        '<div class="bar"><div class="bar__fill" style="width:0%"></div></div>'
-      : '<div class="stock-row"><span class="now">' + fmtInt(stock) + ' <span class="max">cajas</span></span>' +
-        '<span class="max">máx ' + fmtInt(a.stockMaximo) + ' · pto ' + fmtInt(a.puntoPedido) + '</span></div>' +
-        '<div class="bar"><div class="bar__fill ' + fill + '" style="width:' + pct + '%"></div></div>';
-    return '<div class="article-card">' +
-      '<div class="article-card__media">' + flag +
-      '<img src="' + fotoDe(a) + '" alt="' + esc(a.nombre) + '" loading="lazy"></div>' +
-      '<div class="article-card__body">' +
-      (a.codigo ? '<div class="article-card__code">' + esc(a.codigo) + '</div>' : '') +
-      '<div class="article-card__name">' + esc(a.nombre) + '</div>' +
-      (a.descripcion ? '<div class="article-card__desc">' + esc(a.descripcion) + '</div>' : '') +
-      stockLine +
-      '<div class="article-card__foot">' +
-      '<button class="btn btn--ghost btn--sm" data-edit="' + a.id + '">Editar</button>' +
-      '<button class="btn btn--ghost btn--sm" data-ver="' + a.id + '">Detalle</button>' +
-      '</div></div></div>';
+  function aplicarFiltroStocks() {
+    var q = (ui.busqueda || '').toLowerCase();
+    $$('[data-art]').forEach(function (tr) {
+      var okq = !q || tr.getAttribute('data-search').indexOf(q) >= 0;
+      var okf = ui.filtro === 'todos' || tr.getAttribute('data-clase') === ui.filtro;
+      tr.style.display = (okq && okf) ? '' : 'none';
+    });
   }
-  afterRender.articulos = function () {
+  afterRender.stocks = function () {
     var inp = $('#buscar');
-    if (inp) inp.addEventListener('input', function () { ui.busqueda = inp.value; var pos = inp.selectionStart; render(); var ni = $('#buscar'); if (ni) { ni.focus(); ni.setSelectionRange(pos, pos); } });
-    $$('[data-chip]').forEach(function (c) { c.addEventListener('click', function () { ui.filtro = c.getAttribute('data-chip'); render(); }); });
-    $$('[data-edit]').forEach(function (b) { b.addEventListener('click', function () { openArticuloForm(b.getAttribute('data-edit')); }); });
-    $$('[data-ver]').forEach(function (b) { b.addEventListener('click', function () { openArticuloDetalle(b.getAttribute('data-ver')); }); });
+    if (inp) inp.addEventListener('input', function () { ui.busqueda = inp.value; aplicarFiltroStocks(); });
+    $$('[data-chip]').forEach(function (c) {
+      c.addEventListener('click', function () {
+        ui.filtro = c.getAttribute('data-chip');
+        $$('[data-chip]').forEach(function (x) { x.classList.toggle('is-active', x === c); });
+        aplicarFiltroStocks();
+      });
+    });
+    $$('[data-art]').forEach(function (tr) {
+      tr.addEventListener('click', function () { openArticulo(tr.getAttribute('data-art')); });
+    });
+    aplicarFiltroStocks();
   };
 
   /* ============================================================
-     COMPRA POR QUINCENA (ranking)
+     MÓDULO 2 · MOVIMIENTOS  (inicial + entregas − ventas = stock hoy)
      ============================================================ */
-  var comprasBusqueda = '';
-  function renderCompras() {
-    var rank = S.rankingCompras();
-    if (!rank.length) return emptyApp();
-    var meta = S.getMeta();
-    var q = S.quincenasPeriodo();
-    var qq = comprasBusqueda.toLowerCase();
-    var filt = rank.filter(function (x) {
-      return !qq || (x.articulo.nombre + ' ' + x.articulo.codigo).toLowerCase().indexOf(qq) >= 0;
-    });
+  function tipoLabel(t) {
+    return t === 'entrega' ? 'Entrega a depósito' : (t === 'venta' ? 'Venta a cliente' : 'Ajuste');
+  }
+  function renderMovimientos() {
+    var arts = S.getArticulos({ soloActivos: true });
+    if (!arts.length) return emptyApp();
+    var stocks = S.computeStocks();
 
-    var html = '<div class="ranking">';
-    html += '<div class="callout"><svg viewBox="0 0 24 24"><path d="M12 2a10 10 0 1 0 0 20 10 10 0 0 0 0-20zm1 15h-2v-6h2v6zm0-8h-2V7h2v2z"/></svg>' +
-      '<div>Cantidades expresadas en <strong>cajas</strong>. Promedio calculado sobre <strong>' + meta.periodoMeses + ' meses</strong> de historial (' + q + ' quincenas). ' +
-      'Si el período real es otro, cambialo en <strong>Configuración</strong> y se recalcula todo.</div></div>';
+    var html = '<div class="callout"><svg viewBox="0 0 24 24"><path d="M12 2a10 10 0 1 0 0 20 10 10 0 0 0 0-20zm1 15h-2v-6h2v6zm0-8h-2V7h2v2z"/></svg>' +
+      '<div><strong>Stock hoy</strong> = stock inicial + entregas de Loeke − ventas de OSA. ' +
+      'Tocá <strong>Ver</strong> en un artículo para ver sus movimientos y el saldo después de cada uno. ' +
+      'El período de abajo filtra ese detalle.</div></div>';
+
+    html += '<div class="toolbar" style="margin-top:18px;">' +
+      '<label class="label" style="margin:0;display:flex;align-items:center;gap:8px;">Desde' +
+      '<input class="input" id="movDesde" type="date" value="' + esc(ui.movDesde) + '" style="width:auto;padding:8px 10px;"></label>' +
+      '<label class="label" style="margin:0;display:flex;align-items:center;gap:8px;">Hasta' +
+      '<input class="input" id="movHasta" type="date" value="' + esc(ui.movHasta) + '" style="width:auto;padding:8px 10px;"></label>' +
+      (ui.movDesde || ui.movHasta ? btn('mov-limpiar', 'ghost btn--sm', '', 'Limpiar período') : '') +
+      '</div>';
+
+    html += '<div class="card"><div class="table-wrap"><table class="table"><thead><tr>' +
+      '<th>Artículo</th><th class="num">Inicial</th><th class="num">Entregas</th><th class="num">Ventas</th>' +
+      '<th class="num">Stock hoy</th><th class="right">Detalle</th></tr></thead><tbody>';
+    arts.forEach(function (a) {
+      var t = S.totales(a.id);
+      var abierto = !!ui.expanded[a.id];
+      html += '<tr data-artrow="' + a.id + '">' +
+        '<td><div class="cell-art"><img src="' + fotoDe(a) + '" alt=""><div><div class="nm">' + esc(a.nombre) + '</div><div class="cd">' + esc(a.codigo || '') + '</div></div></div></td>' +
+        '<td class="num muted">' + fmtInt(a.stockInicial) + '</td>' +
+        '<td class="num" style="color:var(--ok);">+' + fmtInt(t.entregas) + '</td>' +
+        '<td class="num" style="color:var(--primary);">−' + fmtInt(t.ventas) + '</td>' +
+        '<td class="num"><strong>' + fmtInt(stocks[a.id]) + '</strong></td>' +
+        '<td class="right"><button class="btn btn--ghost btn--sm" data-vermov="' + a.id + '">' + (abierto ? 'Ocultar' : 'Ver') + '</button></td>' +
+        '</tr>';
+      html += '<tr class="mov-detail" data-detail="' + a.id + '"' + (abierto ? '' : ' hidden') + '>' +
+        '<td colspan="6" style="background:var(--surface-2);">' + ledgerHTML(a.id) + '</td></tr>';
+    });
+    html += '</tbody></table></div></div>';
+    return html;
+  }
+  function ledgerHTML(id) {
+    var filas = S.movimientosConSaldo(id, { desde: ui.movDesde, hasta: ui.movHasta });
+    if (!filas.length) {
+      return '<p class="muted" style="padding:12px 4px;">Sin movimientos' + (ui.movDesde || ui.movHasta ? ' en el período' : '') + '. El saldo se mantiene en el stock inicial.</p>';
+    }
+    var html = '<table class="table" style="margin:4px 0;"><thead><tr>' +
+      '<th>Fecha</th><th>Tipo</th><th class="num">Cantidad</th><th class="num">Saldo</th><th class="right"></th>' +
+      '</tr></thead><tbody>';
+    // Más reciente primero para leer cómodo
+    filas.slice().reverse().forEach(function (f) {
+      var m = f.mov;
+      var signo = m.tipo === 'venta' ? '−' : (m.tipo === 'ajuste' && m.cantidad < 0 ? '−' : '+');
+      var color = m.tipo === 'entrega' ? 'var(--ok)' : (m.tipo === 'venta' ? 'var(--primary)' : 'var(--warn)');
+      html += '<tr>' +
+        '<td>' + fmtFecha(m.fecha) + '</td>' +
+        '<td>' + tipoLabel(m.tipo) + (m.nota ? ' <span class="muted">· ' + esc(m.nota) + '</span>' : '') + '</td>' +
+        '<td class="num" style="color:' + color + ';font-weight:700;">' + signo + fmtInt(Math.abs(m.cantidad)) + '</td>' +
+        '<td class="num"><strong>' + fmtInt(f.saldo) + '</strong></td>' +
+        '<td class="right"><button class="iconbtn" data-delmov="' + m.id + '" title="Eliminar"><svg viewBox="0 0 24 24" width="16" height="16"><path d="M6 7h12l-1 14H7L6 7zm3-3h6l1 2h4v2H2V6h4l1-2z"/></svg></button></td>' +
+        '</tr>';
+    });
+    html += '</tbody></table>';
+    return html;
+  }
+  afterRender.movimientos = function () {
+    var d = $('#movDesde'), h = $('#movHasta');
+    if (d) d.addEventListener('change', function () { ui.movDesde = d.value; render(); });
+    if (h) h.addEventListener('change', function () { ui.movHasta = h.value; render(); });
+    bindAction('mov-limpiar', function () { ui.movDesde = ''; ui.movHasta = ''; render(); });
+    $$('[data-vermov]').forEach(function (b) {
+      b.addEventListener('click', function () {
+        var id = b.getAttribute('data-vermov');
+        var det = $('[data-detail="' + id + '"]');
+        var abrir = det.hidden;
+        det.hidden = !abrir;
+        ui.expanded[id] = abrir;
+        b.textContent = abrir ? 'Ocultar' : 'Ver';
+      });
+    });
+    $$('[data-delmov]').forEach(function (b) {
+      b.addEventListener('click', function () {
+        var id = b.getAttribute('data-delmov');
+        confirmar('Eliminar movimiento', 'El stock se recalcula sin este movimiento. ¿Continuar?', function () {
+          S.removeMovimiento(id); toast('Movimiento eliminado', 'ok'); render();
+        });
+      });
+    });
+    // Si venimos de "Ver movimientos" de un artículo, abrir y centrar
+    if (pendingExpand) {
+      var row = $('[data-detail="' + pendingExpand + '"]');
+      var arow = $('[data-artrow="' + pendingExpand + '"]');
+      pendingExpand = null;
+      if (row && arow) { arow.scrollIntoView({ block: 'center' }); }
+    }
+  };
+
+  /* ============================================================
+     MÓDULO 3 · PUNTO DE PEDIDO
+     ============================================================ */
+  function renderPunto() {
+    var arts = S.getArticulos({ soloActivos: true });
+    if (!arts.length) return emptyApp();
+    var m = S.getMeta();
+
+    var html = '<div class="grid-2">';
+    html += '<div class="card"><div class="card__head"><h2>Parámetros globales</h2></div><div class="card__body">' +
+      '<div class="form-grid">' +
+      field('Meses de cobertura por defecto', '<input class="input" id="pMeses" type="number" min="0" step="0.5" value="' + esc(m.mesesPedidoDefault) + '">') +
+      field('Meses del historial de ventas', '<input class="input" id="pPeriodo" type="number" min="1" step="1" value="' + esc(m.periodoMeses) + '">') +
+      '</div>' +
+      '<div class="hint"><strong>Punto de pedido</strong> = promedio de ventas mensual × meses de cobertura. ' +
+      'El promedio automático es <em>ventas conocidas ÷ meses del historial</em>. Podés sobrescribir el promedio o los meses por artículo en la tabla.</div>' +
+      '</div></div>';
+    html += '<div class="card"><div class="card__body" style="display:flex;align-items:center;">' +
+      '<div class="callout" style="margin:0;"><svg viewBox="0 0 24 24"><path d="M3 13h2v7H3zM10 8h2v12h-2zM17 4h2v16h-2z"/></svg>' +
+      '<div>Dejá un campo <strong>en blanco</strong> para usar el valor automático (promedio) o el global (meses). ' +
+      'Tocá <strong>Guardar</strong> arriba para aplicar los cambios.</div></div>' +
+      '</div></div>';
+    html += '</div>';
 
     html += '<div class="toolbar" style="margin-top:18px;">' +
       '<div class="search"><svg viewBox="0 0 24 24"><path d="M21 20l-5.6-5.6a7 7 0 1 0-1.4 1.4L20 21zM4 10a5 5 0 1 1 10 0 5 5 0 0 1-10 0z"/></svg>' +
-      '<input id="buscarC" type="text" placeholder="Buscar artículo…" value="' + esc(comprasBusqueda) + '"></div>' +
-      '<span class="muted nowrap">' + rank.length + ' artículos · promedio de los últimos ' + meta.periodoMeses + ' meses</span></div>';
+      '<input id="buscarP" type="text" placeholder="Buscar artículo…" value="' + esc(ui.qPunto) + '"></div>' +
+      '<span class="muted nowrap">' + arts.length + ' artículos</span></div>';
 
     html += '<div class="card"><div class="table-wrap"><table class="table"><thead><tr>' +
-      '<th style="width:40px;">#</th><th>Artículo</th>' +
-      '<th class="num" style="width:118px;">Cajas/mes</th><th class="num" style="width:140px;">Cajas/quincena</th>' +
-      '</tr></thead><tbody>';
-    filt.forEach(function (x) {
-      var a = x.articulo;
-      var pos = rank.indexOf(x) + 1;
-      html += '<tr data-ver="' + a.id + '" style="cursor:pointer;">' +
-        '<td class="num muted">' + pos + '</td>' +
+      '<th>Artículo</th><th class="num">Prom. auto</th><th class="num">Promedio usado</th>' +
+      '<th class="num">Meses</th><th class="num">Punto de pedido</th></tr></thead><tbody>';
+    arts.forEach(function (a) {
+      var auto = S.promedioMensualAuto(a);
+      html += '<tr data-rowp="' + a.id + '" data-search="' + esc((a.nombre + ' ' + (a.codigo || '')).toLowerCase()) + '">' +
         '<td><div class="cell-art"><img src="' + fotoDe(a) + '" alt=""><div><div class="nm">' + esc(a.nombre) + '</div><div class="cd">' + esc(a.codigo || '') + '</div></div></div></td>' +
-        '<td class="num muted">' + fmtDec(x.promMes) + '</td>' +
-        '<td class="num"><strong style="font-size:15px;">' + fmtDec(x.promQuincena) + '</strong></td>' +
+        '<td class="num muted">' + fmtInt(auto) + '</td>' +
+        '<td class="num"><input class="qty-input" type="number" min="0" step="0.5" value="' + (a.promedioManual != null ? a.promedioManual : '') + '" placeholder="' + fmtInt(auto) + '" data-prom="' + a.id + '"></td>' +
+        '<td class="num"><input class="qty-input" type="number" min="0" step="0.5" value="' + (a.mesesPedido != null ? a.mesesPedido : '') + '" placeholder="' + esc(m.mesesPedidoDefault) + '" data-meses="' + a.id + '"></td>' +
+        '<td class="num" data-pp="' + a.id + '"><strong>' + fmtInt(S.puntoPedido(a)) + '</strong></td>' +
         '</tr>';
     });
     html += '</tbody></table></div></div>';
-    html += '</div>';
     return html;
   }
-  afterRender.compras = function () {
-    var inp = $('#buscarC');
-    if (inp) inp.addEventListener('input', function () {
-      comprasBusqueda = inp.value; var p = inp.selectionStart; render();
-      var ni = $('#buscarC'); if (ni) { ni.focus(); ni.setSelectionRange(p, p); }
+  afterRender.puntopedido = function () {
+    var b = $('#buscarP');
+    if (b) b.addEventListener('input', function () {
+      ui.qPunto = b.value; var q = b.value.toLowerCase();
+      $$('[data-rowp]').forEach(function (tr) {
+        tr.style.display = (!q || tr.getAttribute('data-search').indexOf(q) >= 0) ? '' : 'none';
+      });
     });
-    $$('[data-ver]').forEach(function (b) { b.addEventListener('click', function () { openArticuloDetalle(b.getAttribute('data-ver')); }); });
+    // Vista previa del punto de pedido al editar (sin guardar)
+    function preview(id) {
+      var a = S.getArticulo(id); if (!a) return;
+      var promI = $('[data-prom="' + id + '"]'), mesI = $('[data-meses="' + id + '"]');
+      var meta = S.getMeta();
+      var prom = promI.value === '' ? S.promedioMensualAuto(a) : (parseFloat(promI.value) || 0);
+      var mes = mesI.value === '' ? (meta.mesesPedidoDefault || 0) : (parseFloat(mesI.value) || 0);
+      var cell = $('[data-pp="' + id + '"]');
+      if (cell) cell.innerHTML = '<strong>' + fmtInt(prom * mes) + '</strong>';
+    }
+    $$('[data-prom]').forEach(function (i) { i.addEventListener('input', function () { preview(i.getAttribute('data-prom')); }); });
+    $$('[data-meses]').forEach(function (i) { i.addEventListener('input', function () { preview(i.getAttribute('data-meses')); }); });
+    var gM = $('#pMeses'), gP = $('#pPeriodo');
+    if (gM) gM.addEventListener('input', function () { $$('[data-prom]').forEach(function (i) { preview(i.getAttribute('data-prom')); }); });
+    if (gP) gP.addEventListener('input', function () { $$('[data-prom]').forEach(function (i) { preview(i.getAttribute('data-prom')); }); });
   };
-
-  /* ---------- Formulario de artículo ---------- */
-  function openArticuloForm(id) {
-    var a = id ? S.getArticulo(id) : null;
-    var foto = a ? a.foto : '';
-    var body = '' +
-      '<form class="form" id="artForm">' +
-      '<div class="imgdrop" id="imgdrop">' +
-      '<img class="imgdrop__preview" id="imgPreview" src="' + esc(foto || S.placeholder(a ? a.nombre : 'Nuevo')) + '" alt="">' +
-      '<div class="imgdrop__text"><strong>Foto del artículo</strong><span>Tocá para subir una imagen (JPG/PNG). Se optimiza sola.</span></div>' +
-      '<input type="file" id="imgInput" accept="image/*" hidden>' +
-      '</div>' +
-      '<input type="hidden" id="fFoto" value="' + esc(foto) + '">' +
-      '<div class="form-grid">' +
-      field('Nombre', '<input class="input" id="fNombre" value="' + esc(a ? a.nombre : '') + '" placeholder="Ej: Alfajor Triple" required>', true) +
-      field('Código / SKU <span class="opt">(opcional)</span>', '<input class="input" id="fCodigo" value="' + esc(a ? a.codigo : '') + '" placeholder="Ej: GOL-007">') +
-      field('Descripción <span class="opt">(opcional)</span>', '<textarea class="textarea" id="fDesc" placeholder="Detalle visible en el catálogo…">' + esc(a ? a.descripcion : '') + '</textarea>', true) +
-      field('Stock inicial', '<input class="input" id="fInicial" type="number" min="0" step="1" value="' + (a ? a.stockInicial : 0) + '">') +
-      field('Stock máximo', '<input class="input" id="fMax" type="number" min="0" step="1" value="' + (a ? a.stockMaximo : 0) + '" placeholder="Tope a reponer">') +
-      field('Punto de pedido', '<input class="input" id="fPunto" type="number" min="0" step="1" value="' + (a ? a.puntoPedido : 0) + '">') +
-      field('Precio unitario <span class="opt">(opcional)</span>', '<div class="input-prefix"><span>$</span><input class="input" id="fPrecio" type="number" min="0" step="0.01" value="' + (a ? a.precio : 0) + '"></div>') +
-      '</div>' +
-      '<div class="hint">El <strong>punto de pedido</strong> es el nivel que dispara la reposición: cuando el stock baja hasta ese valor, el sistema sugiere un pedido para volver al <strong>stock máximo</strong>.</div>' +
-      '<div class="form-actions">' +
-      (a ? '<button type="button" class="btn btn--danger" id="fEliminar">Eliminar</button>' : '') +
-      '<div style="flex:1"></div>' +
-      '<button type="button" class="btn btn--ghost" data-close>Cancelar</button>' +
-      '<button type="submit" class="btn btn--primary">' + iconSave() + '<span>Guardar</span></button>' +
-      '</div></form>';
-    openModal(a ? 'Editar artículo' : 'Nuevo artículo', body);
-
-    var preview = $('#imgPreview'), fFoto = $('#fFoto'), fNombre = $('#fNombre');
-    $('#imgdrop').addEventListener('click', function () { $('#imgInput').click(); });
-    $('#imgInput').addEventListener('change', function (e) {
-      var file = e.target.files[0];
-      if (!file) return;
-      comprimirImagen(file, function (dataUrl) {
-        fFoto.value = dataUrl; preview.src = dataUrl;
+  function guardarPunto() {
+    var gM = $('#pMeses'), gP = $('#pPeriodo');
+    if (gM || gP) {
+      S.setMeta({
+        mesesPedidoDefault: Math.max(0, parseFloat(gM.value) || 0),
+        periodoMeses: Math.max(1, Math.round(parseFloat(gP.value) || 1))
       });
-    });
-    // Autocompletar punto de pedido al tipear máximo (si está en 0)
-    $('#fMax').addEventListener('change', function () {
-      var pt = $('#fPunto');
-      if (!parseInt(pt.value, 10)) pt.value = Math.round(parseFloat($('#fMax').value || 0) * 0.4);
-    });
-    if (!foto) fNombre.addEventListener('input', function () { if (!fFoto.value) preview.src = S.placeholder(fNombre.value || 'Nuevo'); });
-
-    if (a) $('#fEliminar').addEventListener('click', function () {
-      confirmar('Eliminar artículo', '¿Eliminar «' + a.nombre + '» y todos sus movimientos? Esta acción no se puede deshacer.', function () {
-        S.removeArticulo(a.id); closeModal(); toast('Artículo eliminado', 'ok'); render();
+    }
+    var n = 0;
+    $$('[data-prom]').forEach(function (i) {
+      var id = i.getAttribute('data-prom');
+      var mesI = $('[data-meses="' + id + '"]');
+      S.updateArticulo(id, {
+        promedioManual: i.value === '' ? null : i.value,
+        mesesPedido: mesI && mesI.value === '' ? null : (mesI ? mesI.value : null)
       });
+      n++;
     });
-
-    $('#artForm').addEventListener('submit', function (e) {
-      e.preventDefault();
-      var data = {
-        nombre: fNombre.value, codigo: $('#fCodigo').value, descripcion: $('#fDesc').value,
-        foto: fFoto.value, precio: $('#fPrecio').value,
-        stockInicial: $('#fInicial').value, stockMaximo: $('#fMax').value, puntoPedido: $('#fPunto').value
-      };
-      if (!data.nombre.trim()) { toast('Poné un nombre al artículo', 'warn'); return; }
-      if (a) { S.updateArticulo(a.id, data); toast('Artículo actualizado', 'ok'); }
-      else { S.addArticulo(data); toast('Artículo creado', 'ok'); }
-      closeModal(); render();
-    });
-  }
-
-  function openArticuloDetalle(id) {
-    var a = S.getArticulo(id); if (!a) return;
-    var stock = S.stockActual(id), t = S.totales(id), e = S.estado(a, stock);
-    var meta = S.getMeta();
-    var badge = e === 'config' ? '<span class="badge badge--muted"><span class="dot"></span>A configurar</span>'
-      : (e === 'sin' ? '<span class="badge badge--danger"><span class="dot"></span>Sin stock</span>'
-        : (e === 'bajo' ? '<span class="badge badge--warn"><span class="dot"></span>Para reponer</span>'
-          : '<span class="badge badge--ok"><span class="dot"></span>En nivel</span>'));
-    var movs = S.getMovimientos({ articuloId: id }).slice(0, 8);
-    var body = '<img src="' + fotoDe(a) + '" alt="" style="width:100%;height:190px;object-fit:cover;border-radius:13px;margin-bottom:16px;">' +
-      '<div class="row" style="justify-content:space-between;margin-bottom:6px;">' +
-      '<div><div class="article-card__code">' + esc(a.codigo || '') + '</div><h2 style="font-size:20px;">' + esc(a.nombre) + '</h2></div>' + badge + '</div>' +
-      (a.descripcion ? '<p class="muted" style="margin-bottom:16px;line-height:1.5;">' + esc(a.descripcion) + '</p>' : '') +
-      '<div class="callout" style="margin-bottom:14px;"><svg viewBox="0 0 24 24"><path d="M3 13h2v7H3zM10 8h2v12h-2zM17 4h2v16h-2z"/></svg>' +
-      '<div>El cliente te compra en promedio <strong>' + fmtDec(S.promedioQuincena(a)) + ' cajas/quincena</strong> ' +
-      '(' + fmtDec(S.promedioMes(a)) + ' cajas/mes, últimos ' + meta.periodoMeses + ' meses).</div></div>' +
-      '<div class="stats" style="margin-bottom:8px;">' +
-      miniStat('Stock actual', e === 'config' ? '—' : fmtInt(stock)) +
-      miniStat('Stock máximo', a.stockMaximo ? fmtInt(a.stockMaximo) : '—') +
-      miniStat('Punto de pedido', a.stockMaximo ? fmtInt(a.puntoPedido) : '—') +
-      miniStat('A reponer', e === 'config' ? '—' : fmtInt(S.sugerido(a, stock))) +
-      '</div>' +
-      '<div class="row" style="gap:18px;margin:10px 2px 4px;font-size:13px;">' +
-      '<span class="muted">Inicial: <strong>' + fmtInt(a.stockInicial) + '</strong></span>' +
-      '<span class="muted">Entregas: <strong style="color:var(--ok)">+' + fmtInt(t.entregas) + '</strong></span>' +
-      '<span class="muted">Ventas: <strong style="color:var(--primary)">−' + fmtInt(t.ventas) + '</strong></span>' +
-      (t.ajustes ? '<span class="muted">Ajustes: <strong>' + (t.ajustes > 0 ? '+' : '') + fmtInt(t.ajustes) + '</strong></span>' : '') +
-      '</div>' +
-      '<div class="section-title">Últimos movimientos</div>' +
-      (movs.length ? '<ul class="list-reset">' + movs.map(movItem).join('') + '</ul>' : '<p class="muted">Sin movimientos.</p>') +
-      '<div class="form-actions" style="margin-top:18px;">' +
-      '<button class="btn btn--ghost" data-close>Cerrar</button>' +
-      '<button class="btn btn--primary" id="dEditar">Editar artículo</button></div>';
-    openModal('Detalle del artículo', body);
-    $('#dEditar').addEventListener('click', function () { openArticuloForm(id); });
-  }
-  function miniStat(label, value) {
-    return '<div class="stat tone-primary" style="padding:14px;"><div class="stat__label">' + esc(label) + '</div><div class="stat__value" style="font-size:22px;">' + value + '</div></div>';
+    toast('Punto de pedido actualizado', 'ok');
+    render();
   }
 
   /* ============================================================
-     CARGAR VENTAS  /  ENTREGAS  (tabla de carga rápida)
+     MÓDULO 4 / 5 · ENTREGAS LOEKE  /  VENTAS OSA  (carga rápida)
      ============================================================ */
   function renderCarga(tipo) {
     var arts = S.getArticulos({ soloActivos: true });
     if (!arts.length) return emptyApp();
     var stocks = S.computeStocks();
     var esVenta = tipo === 'venta';
-    var titulo = esVenta ? 'Ventas informadas por el cliente' : 'Entregas que hiciste al cliente';
+    var titulo = esVenta ? 'Ventas de OSA a sus clientes' : 'Entregas de Loeke a OSA';
     var explica = esVenta
-      ? 'Cargá las cajas que el cliente <strong>vendió</strong> en el período (informe quincenal). Se descuentan del stock.'
-      : 'Cargá las cajas que <strong>entregaste</strong> para reponer. Se suman al stock del cliente.';
+      ? 'Cargá las cajas que OSA <strong>vendió</strong> a sus clientes. Salen del stock.'
+      : 'Cargá las cajas que <strong>Loeke entregó</strong> a OSA. Entran al stock.';
+    var fmtFut = esVenta ? 'Importación desde <strong>PDF</strong> (ventas totales por artículo): próximamente.' : 'Importación desde <strong>Excel</strong>: próximamente.';
 
-    var html = '<div class="callout' + (esVenta ? '' : '') + '"><svg viewBox="0 0 24 24"><path d="M12 2a10 10 0 1 0 0 20 10 10 0 0 0 0-20zm1 15h-2v-6h2v6zm0-8h-2V7h2v2z"/></svg><div>' + explica + '</div></div>';
+    var html = '<div class="callout"><svg viewBox="0 0 24 24"><path d="M12 2a10 10 0 1 0 0 20 10 10 0 0 0 0-20zm1 15h-2v-6h2v6zm0-8h-2V7h2v2z"/></svg><div>' + explica + ' <span class="muted">' + fmtFut + '</span></div></div>';
     html += '<div class="card" style="margin-top:18px;">';
     html += '<div class="card__head"><h2>' + titulo + '</h2><div class="spacer"></div>' +
       '<label class="label" style="margin:0;display:flex;align-items:center;gap:8px;">Fecha' +
       '<input class="input" id="cargaFecha" type="date" value="' + S.hoyISO() + '" style="width:auto;padding:8px 10px;"></label></div>';
+    html += '<div class="search" style="margin:0 18px 4px;flex:none;"><svg viewBox="0 0 24 24"><path d="M21 20l-5.6-5.6a7 7 0 1 0-1.4 1.4L20 21zM4 10a5 5 0 1 1 10 0 5 5 0 0 1-10 0z"/></svg>' +
+      '<input id="buscarCarga" type="text" placeholder="Buscar artículo…"></div>';
     html += '<div class="table-wrap"><table class="table"><thead><tr>' +
       '<th>Artículo</th><th class="num">Stock actual</th>' +
-      (esVenta ? '<th class="num">Vendidas</th><th class="num">Quedaría</th>' : '<th class="num">Entregadas</th><th class="num">Quedaría</th>') +
+      (esVenta ? '<th class="num">Vendidas</th>' : '<th class="num">Entregadas</th>') + '<th class="num">Quedaría</th>' +
       '</tr></thead><tbody>';
     arts.forEach(function (a) {
       var s = stocks[a.id];
-      html += '<tr data-row="' + a.id + '">' +
+      html += '<tr data-rowc data-search="' + esc((a.nombre + ' ' + (a.codigo || '')).toLowerCase()) + '">' +
         '<td><div class="cell-art"><img src="' + fotoDe(a) + '" alt=""><div><div class="nm">' + esc(a.nombre) + '</div><div class="cd">' + esc(a.codigo || '') + '</div></div></div></td>' +
         '<td class="num">' + fmtInt(s) + '</td>' +
         '<td class="num"><input class="qty-input" type="number" min="0" step="1" value="" placeholder="0" data-qty="' + a.id + '" data-stock="' + s + '"></td>' +
@@ -526,7 +485,7 @@
     html += '</tbody></table></div>';
     html += '<div class="card__body" style="border-top:1px solid var(--line);"><div class="row" style="justify-content:flex-end;gap:10px;">' +
       '<span class="muted" id="cargaResumen" style="margin-right:auto;">0 artículos cargados</span>' +
-      btn(esVenta ? 'guardar-ventas' : 'guardar-entregas', 'primary', iconSave(), esVenta ? 'Guardar informe' : 'Registrar entregas') +
+      btn(esVenta ? 'guardar-ventas' : 'guardar-entregas', 'primary', iconSave(), esVenta ? 'Guardar ventas' : 'Registrar entregas') +
       '</div></div>';
     html += '</div>';
     return html;
@@ -535,6 +494,13 @@
   function renderEntregas() { return renderCarga('entrega'); }
 
   function bindCarga(esVenta) {
+    var bc = $('#buscarCarga');
+    if (bc) bc.addEventListener('input', function () {
+      var q = bc.value.toLowerCase();
+      $$('[data-rowc]').forEach(function (tr) {
+        tr.style.display = (!q || tr.getAttribute('data-search').indexOf(q) >= 0) ? '' : 'none';
+      });
+    });
     $$('[data-qty]').forEach(function (inp) {
       inp.addEventListener('input', function () {
         var id = inp.getAttribute('data-qty');
@@ -542,8 +508,9 @@
         var q = parseFloat(inp.value) || 0;
         var res = esVenta ? s - q : s + q;
         var cell = $('[data-result="' + id + '"]');
+        var a = S.getArticulo(id);
         cell.textContent = fmtInt(res);
-        cell.style.color = res < 0 ? 'var(--danger)' : (res <= (S.getArticulo(id).puntoPedido || 0) ? 'var(--warn)' : '');
+        cell.style.color = res < 0 ? 'var(--danger)' : (res < S.puntoPedido(a) ? 'var(--warn)' : '');
         cell.style.fontWeight = '700';
         var n = $$('[data-qty]').filter(function (i) { return (parseFloat(i.value) || 0) > 0; }).length;
         $('#cargaResumen').textContent = n + (n === 1 ? ' artículo cargado' : ' artículos cargados');
@@ -558,14 +525,14 @@
     var batch = [];
     $$('[data-qty]').forEach(function (inp) {
       var q = Math.round(parseFloat(inp.value) || 0);
-      if (q > 0) batch.push({ articuloId: inp.getAttribute('data-qty'), tipo: esVenta ? 'venta' : 'entrega', cantidad: q, fecha: fecha, nota: esVenta ? 'Informe del cliente' : 'Entrega de reposición' });
+      if (q > 0) batch.push({ articuloId: inp.getAttribute('data-qty'), tipo: esVenta ? 'venta' : 'entrega', cantidad: q, fecha: fecha, nota: esVenta ? 'Venta OSA' : 'Entrega Loeke' });
     });
     if (!batch.length) { toast('Cargá al menos una cantidad', 'warn'); return; }
     S.addMovimientosBatch(batch);
     var n = batch.length;
     if (esVenta) {
       var pend = S.pedidoSugerido().length;
-      toast('Informe guardado: ' + n + ' artículo(s)', 'ok');
+      toast('Ventas guardadas: ' + n + ' artículo(s)', 'ok');
       render();
       if (pend) setTimeout(function () { toast(pend + ' artículo(s) necesitan reposición', 'warn'); }, 600);
     } else {
@@ -574,260 +541,6 @@
     }
   }
 
-  /* ============================================================
-     STOCK INICIAL (carga del stock actual del cliente)
-     ============================================================ */
-  function renderInicial() {
-    var arts = S.getArticulos({ soloActivos: true });
-    if (!arts.length) return emptyApp();
-
-    var html = '<div class="callout"><svg viewBox="0 0 24 24"><path d="M12 2a10 10 0 1 0 0 20 10 10 0 0 0 0-20zm1 15h-2v-6h2v6zm0-8h-2V7h2v2z"/></svg>' +
-      '<div>Cargá las <strong>cajas que el cliente tiene hoy</strong> de cada artículo. Es el punto de partida del stock; ' +
-      'después se suma lo que entregás y se resta lo que vende. Lo que dejes en 0 queda en 0.</div></div>';
-
-    html += '<div class="card" style="margin-top:18px;">';
-    html += '<div class="card__head"><h2>Stock inicial por artículo</h2><div class="spacer"></div>' +
-      '<div class="search" style="flex:none;width:240px;"><svg viewBox="0 0 24 24"><path d="M21 20l-5.6-5.6a7 7 0 1 0-1.4 1.4L20 21zM4 10a5 5 0 1 1 10 0 5 5 0 0 1-10 0z"/></svg>' +
-      '<input id="buscarIni" type="text" placeholder="Buscar artículo…"></div></div>';
-    html += '<div class="table-wrap"><table class="table"><thead><tr>' +
-      '<th>Artículo</th><th class="num">Stock máximo</th><th class="num">Stock hoy (cajas)</th>' +
-      '</tr></thead><tbody>';
-    arts.forEach(function (a) {
-      html += '<tr data-row-ini data-search="' + esc((a.nombre + ' ' + a.codigo).toLowerCase()) + '">' +
-        '<td><div class="cell-art"><img src="' + fotoDe(a) + '" alt=""><div><div class="nm">' + esc(a.nombre) + '</div><div class="cd">' + esc(a.codigo || '') + '</div></div></div></td>' +
-        '<td class="num muted">' + fmtInt(a.stockMaximo) + '</td>' +
-        '<td class="num"><input class="qty-input" type="number" min="0" step="1" value="' + (a.stockInicial || 0) + '" data-inicial="' + a.id + '"></td>' +
-        '</tr>';
-    });
-    html += '</tbody></table></div>';
-    html += '<div class="card__body" style="border-top:1px solid var(--line);"><div class="row" style="justify-content:flex-end;gap:10px;">' +
-      '<span class="muted" style="margin-right:auto;">' + arts.length + ' artículos</span>' +
-      btn('guardar-inicial', 'primary', iconSave(), 'Guardar stock inicial') + '</div></div>';
-    html += '</div>';
-    return html;
-  }
-  afterRender.inicial = function () {
-    var b = $('#buscarIni');
-    if (b) b.addEventListener('input', function () {
-      var q = b.value.toLowerCase();
-      $$('[data-row-ini]').forEach(function (tr) {
-        tr.style.display = (!q || tr.getAttribute('data-search').indexOf(q) >= 0) ? '' : 'none';
-      });
-    });
-  };
-  function guardarInicial() {
-    var n = 0;
-    $$('[data-inicial]').forEach(function (inp) {
-      var id = inp.getAttribute('data-inicial');
-      var val = Math.max(0, Math.round(parseFloat(inp.value) || 0));
-      var a = S.getArticulo(id);
-      if (a && (a.stockInicial || 0) !== val) { S.updateArticulo(id, { stockInicial: val }); n++; }
-    });
-    S.setMeta({ datosReales: true }); // protege estos datos de futuras recargas de catálogo
-    toast(n ? 'Stock inicial guardado (' + n + ' artículos)' : 'No hubo cambios', n ? 'ok' : 'info');
-    render();
-  }
-
-  /* ============================================================
-     PEDIDO SUGERIDO
-     ============================================================ */
-  function renderPedido() {
-    var sug = S.pedidoSugerido();
-    var pedidos = S.getPedidos();
-    var html = '';
-
-    if (!sug.length) {
-      html += '<div class="card"><div class="card__body"><div class="empty">' +
-        '<div class="empty__ic" style="background:var(--ok-bg);color:var(--ok);"><svg viewBox="0 0 24 24"><path d="M9 16.2 4.8 12l-1.4 1.4L9 19 21 7l-1.4-1.4z"/></svg></div>' +
-        '<h3>No hay nada para reponer</h3>' +
-        '<p>Todos los artículos están por encima de su punto de pedido. Cuando cargues nuevas ventas y el stock baje, acá aparecerá el pedido sugerido automáticamente.</p>' +
-        btn('ir-ventas', 'primary', '', 'Cargar ventas') +
-        '</div></div></div>';
-    } else {
-      var totalU = sug.reduce(function (a, x) { return a + x.sugerido; }, 0);
-      var totalV = sug.reduce(function (a, x) { return a + x.sugerido * (x.articulo.precio || 0); }, 0);
-      html += '<div class="callout"><svg viewBox="0 0 24 24"><path d="M12 2a10 10 0 1 0 0 20 10 10 0 0 0 0-20zm1 15h-2v-6h2v6zm0-8h-2V7h2v2z"/></svg>' +
-        '<div>Estos artículos están en o por debajo de su punto de pedido. Las cantidades sugeridas reponen hasta el stock máximo. Podés ajustarlas antes de generar el pedido.</div></div>';
-      html += '<div class="card" style="margin-top:18px;">';
-      html += '<div class="card__head"><h2>Reposición sugerida</h2><div class="spacer"></div><span class="badge badge--primary">' + sug.length + ' artículos · ' + fmtInt(totalU) + ' cajas</span></div>';
-      html += '<div class="table-wrap"><table class="table"><thead><tr>' +
-        '<th>Artículo</th><th class="num">Stock</th><th class="num">Punto</th><th class="num">Máximo</th><th class="num">A pedir</th>' +
-        (totalV ? '<th class="num">Subtotal</th>' : '') + '</tr></thead><tbody>';
-      sug.forEach(function (x) {
-        var a = x.articulo;
-        html += '<tr>' +
-          '<td><div class="cell-art"><img src="' + fotoDe(a) + '" alt=""><div><div class="nm">' + esc(a.nombre) + '</div><div class="cd">' + esc(a.codigo || '') + '</div></div></div></td>' +
-          '<td class="num" style="color:var(--warn);font-weight:700;">' + fmtInt(x.stock) + '</td>' +
-          '<td class="num">' + fmtInt(a.puntoPedido) + '</td>' +
-          '<td class="num">' + fmtInt(a.stockMaximo) + '</td>' +
-          '<td class="num"><input class="qty-input" type="number" min="0" step="1" value="' + x.sugerido + '" data-pedido="' + a.id + '" data-precio="' + (a.precio || 0) + '"></td>' +
-          (totalV ? '<td class="num" data-sub="' + a.id + '">' + fmtMoney(x.sugerido * (a.precio || 0)) + '</td>' : '') +
-          '</tr>';
-      });
-      html += '</tbody></table></div>';
-      html += '<div class="card__body" style="border-top:1px solid var(--line);"><div class="row" style="justify-content:flex-end;gap:10px;">' +
-        (totalV ? '<span class="muted" style="margin-right:auto;">Total estimado: <strong id="pedTotal" style="color:var(--text)">' + fmtMoney(totalV) + '</strong></span>' : '<span style="margin-right:auto;"></span>') +
-        btn('print-sugerido', 'ghost', iconPrint(), 'Imprimir') +
-        btn('generar-pedido', 'primary', '<svg viewBox="0 0 24 24"><path d="M9 16.2 4.8 12l-1.4 1.4L9 19 21 7l-1.4-1.4z"/></svg>', 'Confirmar pedido') +
-        '</div></div>';
-      html += '</div>';
-    }
-
-    // Historial de pedidos
-    html += '<div class="section-title">Pedidos registrados</div>';
-    if (!pedidos.length) {
-      html += '<div class="card"><div class="card__body"><p class="muted text-c" style="padding:16px 0;">Todavía no generaste pedidos. Cuando confirmes uno, quedará acá para imprimir o marcar como entregado.</p></div></div>';
-    } else {
-      html += '<div class="card"><div class="table-wrap"><table class="table"><thead><tr><th>Pedido</th><th>Fecha</th><th class="num">Ítems</th><th class="num">Cajas</th><th>Estado</th><th class="right">Acciones</th></tr></thead><tbody>';
-      pedidos.forEach(function (p) {
-        var u = p.items.reduce(function (a, it) { return a + it.cantidad; }, 0);
-        var est = p.estado === 'entregado' ? '<span class="badge badge--ok"><span class="dot"></span>Entregado</span>' : '<span class="badge badge--warn"><span class="dot"></span>Pendiente</span>';
-        html += '<tr>' +
-          '<td><strong>#' + p.id.slice(-5).toUpperCase() + '</strong></td>' +
-          '<td>' + fmtFecha(p.fecha) + '</td>' +
-          '<td class="num">' + p.items.length + '</td>' +
-          '<td class="num">' + fmtInt(u) + '</td>' +
-          '<td>' + est + '</td>' +
-          '<td class="right nowrap">' +
-          '<button class="btn btn--ghost btn--sm" data-pimprimir="' + p.id + '">Imprimir</button> ' +
-          (p.estado !== 'entregado' ? '<button class="btn btn--primary btn--sm" data-pentregar="' + p.id + '">Marcar entregado</button> ' : '') +
-          '<button class="iconbtn" data-peliminar="' + p.id + '" title="Eliminar"><svg viewBox="0 0 24 24" width="18" height="18"><path d="M6 7h12l-1 14H7L6 7zm3-3h6l1 2h4v2H2V6h4l1-2z"/></svg></button>' +
-          '</td></tr>';
-      });
-      html += '</tbody></table></div></div>';
-    }
-    return html;
-  }
-  afterRender.pedido = function () {
-    bindAction('ir-ventas', function () { location.hash = '#/ventas'; });
-    bindAction('generar-pedido', generarPedido);
-    // 'print-sugerido' lo maneja la delegación global (topbar + botón de la vista)
-    // recalcular subtotal/total al editar cantidades
-    $$('[data-pedido]').forEach(function (inp) {
-      inp.addEventListener('input', function () {
-        var id = inp.getAttribute('data-pedido');
-        var precio = parseFloat(inp.getAttribute('data-precio')) || 0;
-        var q = parseFloat(inp.value) || 0;
-        var sub = $('[data-sub="' + id + '"]');
-        if (sub) sub.textContent = fmtMoney(q * precio);
-        var total = 0;
-        $$('[data-pedido]').forEach(function (i) { total += (parseFloat(i.value) || 0) * (parseFloat(i.getAttribute('data-precio')) || 0); });
-        var tEl = $('#pedTotal'); if (tEl) tEl.textContent = fmtMoney(total);
-      });
-    });
-    $$('[data-pimprimir]').forEach(function (b) { b.addEventListener('click', function () { imprimirPedido(b.getAttribute('data-pimprimir')); }); });
-    $$('[data-pentregar]').forEach(function (b) { b.addEventListener('click', function () {
-      var id = b.getAttribute('data-pentregar');
-      confirmar('Marcar como entregado', 'Esto registra las entregas y repone el stock del cliente con las cantidades del pedido. ¿Confirmás?', function () {
-        S.marcarPedidoEntregado(id); toast('Pedido entregado y stock repuesto', 'ok'); render();
-      });
-    }); });
-    $$('[data-peliminar]').forEach(function (b) { b.addEventListener('click', function () {
-      var id = b.getAttribute('data-peliminar');
-      confirmar('Eliminar pedido', '¿Eliminar este pedido del historial? No afecta el stock ya registrado.', function () {
-        S.eliminarPedido(id); toast('Pedido eliminado', 'ok'); render();
-      });
-    }); });
-  };
-  function generarPedido() {
-    var items = $$('[data-pedido]').map(function (inp) {
-      return { articuloId: inp.getAttribute('data-pedido'), cantidad: parseFloat(inp.value) || 0 };
-    });
-    var p = S.crearPedido(items);
-    if (!p) { toast('No hay cantidades para pedir', 'warn'); return; }
-    toast('Pedido #' + p.id.slice(-5).toUpperCase() + ' generado', 'ok');
-    render();
-  }
-
-  /* ---------- Impresión de pedido ---------- */
-  function ordenHTML(titulo, items, fecha, idTxt) {
-    var meta = S.getMeta();
-    var totalU = items.reduce(function (a, it) { return a + it.cantidad; }, 0);
-    var hayPrecio = items.some(function (it) { return (it.precio || 0) > 0; });
-    var totalV = items.reduce(function (a, it) { return a + it.cantidad * (it.precio || 0); }, 0);
-    var rows = items.map(function (it) {
-      return '<tr><td>' + esc(it.codigo || '') + '</td><td>' + esc(it.nombre) + '</td><td style="text-align:right">' + fmtInt(it.cantidad) + '</td>' +
-        (hayPrecio ? '<td style="text-align:right">' + fmtMoney(it.precio || 0) + '</td><td style="text-align:right">' + fmtMoney(it.cantidad * (it.precio || 0)) + '</td>' : '') + '</tr>';
-    }).join('');
-    return '<!DOCTYPE html><html lang="es"><head><meta charset="utf-8"><title>' + esc(titulo) + '</title>' +
-      '<style>body{font-family:Inter,Arial,sans-serif;color:#1c2233;margin:40px;}h1{font-size:22px;margin:0 0 2px;}' +
-      '.muted{color:#6b7390;}table{width:100%;border-collapse:collapse;margin-top:18px;}' +
-      'th,td{padding:9px 10px;border-bottom:1px solid #e3e6f0;font-size:13px;text-align:left;}' +
-      'th{background:#f5f6fb;text-transform:uppercase;font-size:11px;letter-spacing:.04em;color:#6b7390;}' +
-      '.head{display:flex;justify-content:space-between;align-items:flex-start;border-bottom:2px solid #4f46e5;padding-bottom:14px;}' +
-      '.tot{margin-top:14px;text-align:right;font-size:15px;font-weight:700;}.brand{font-size:13px;color:#4f46e5;font-weight:700;}</style></head><body>' +
-      '<div class="head"><div><div class="brand">PEDIDO DE REPOSICIÓN</div><h1>' + esc(meta.empresa || 'Mi Empresa') + '</h1>' +
-      (meta.cliente ? '<div class="muted">Cliente: ' + esc(meta.cliente) + '</div>' : '') + '</div>' +
-      '<div class="muted" style="text-align:right">' + (idTxt ? 'N° ' + esc(idTxt) + '<br>' : '') + 'Fecha: ' + fmtFecha(fecha) + '</div></div>' +
-      '<table><thead><tr><th>Código</th><th>Artículo</th><th style="text-align:right">Cantidad</th>' +
-      (hayPrecio ? '<th style="text-align:right">Precio</th><th style="text-align:right">Subtotal</th>' : '') +
-      '</tr></thead><tbody>' + rows + '</tbody></table>' +
-      '<div class="tot">Total cajas: ' + fmtInt(totalU) + (hayPrecio ? ' &nbsp;·&nbsp; Total: ' + fmtMoney(totalV) : '') + '</div>' +
-      '<p class="muted" style="margin-top:40px;font-size:12px;">Generado con StockRotativo · ' + fmtFecha(S.hoyISO()) + '</p>' +
-      '</body></html>';
-  }
-  function abrirImpresion(html) {
-    var w = window.open('', '_blank');
-    if (!w) { toast('Permití las ventanas emergentes para imprimir', 'warn'); return; }
-    w.document.write(html); w.document.close();
-    setTimeout(function () { w.focus(); w.print(); }, 350);
-  }
-  function imprimirSugerido() {
-    var items = $$('[data-pedido]').map(function (inp) {
-      var a = S.getArticulo(inp.getAttribute('data-pedido'));
-      return { codigo: a.codigo, nombre: a.nombre, cantidad: parseFloat(inp.value) || 0, precio: a.precio || 0 };
-    }).filter(function (it) { return it.cantidad > 0; });
-    if (!items.length) { toast('No hay artículos para imprimir', 'warn'); return; }
-    abrirImpresion(ordenHTML('Pedido de reposición', items, S.hoyISO(), null));
-  }
-  function imprimirPedido(id) {
-    var p = S.getPedido(id); if (!p) return;
-    var items = p.items.map(function (it) {
-      var a = S.getArticulo(it.articuloId);
-      return { codigo: it.codigo, nombre: it.nombre, cantidad: it.cantidad, precio: a ? a.precio || 0 : 0 };
-    });
-    abrirImpresion(ordenHTML('Pedido #' + p.id.slice(-5).toUpperCase(), items, p.fecha, '#' + p.id.slice(-5).toUpperCase()));
-  }
-
-  /* ============================================================
-     MOVIMIENTOS
-     ============================================================ */
-  var movFiltro = 'todos';
-  function renderMovimientos() {
-    var movs = S.getMovimientos();
-    if (!movs.length) {
-      return '<div class="card"><div class="card__body"><div class="empty">' +
-        '<div class="empty__ic"><svg viewBox="0 0 24 24"><path d="M13 3a9 9 0 0 0-9 9H1l4 4 4-4H6a7 7 0 1 1 2 4.9l-1.4 1.5A9 9 0 1 0 13 3z"/></svg></div>' +
-        '<h3>Sin movimientos todavía</h3><p>Cuando cargues ventas o entregas, el historial completo aparecerá acá.</p></div></div></div>';
-    }
-    if (movFiltro !== 'todos') movs = movs.filter(function (m) { return m.tipo === movFiltro; });
-    var html = '<div class="toolbar"><div class="chips">' +
-      mChip('todos', 'Todos') + mChip('entrega', 'Entregas') + mChip('venta', 'Ventas') + mChip('ajuste', 'Ajustes') +
-      '</div><div style="flex:1"></div>' + btn('nuevo-ajuste', 'ghost', iconPlus(), 'Ajuste manual') + '</div>';
-    html += '<div class="card"><div class="card__body"><ul class="list-reset">';
-    movs.forEach(function (m) {
-      html += '<li class="timeline-item">' + movItemInner(m) +
-        '<button class="iconbtn" data-delmov="' + m.id + '" title="Eliminar"><svg viewBox="0 0 24 24" width="17" height="17"><path d="M6 7h12l-1 14H7L6 7zm3-3h6l1 2h4v2H2V6h4l1-2z"/></svg></button></li>';
-    });
-    html += '</ul></div></div>';
-    return html;
-  }
-  function mChip(val, label) { return '<button class="chip ' + (movFiltro === val ? 'is-active' : '') + '" data-mchip="' + val + '">' + esc(label) + '</button>'; }
-  function movItemInner(m) {
-    // mismo contenido que movItem pero sin el <li> contenedor
-    var tmp = document.createElement('div'); tmp.innerHTML = movItem(m);
-    return tmp.firstChild.innerHTML;
-  }
-  afterRender.movimientos = function () {
-    $$('[data-mchip]').forEach(function (c) { c.addEventListener('click', function () { movFiltro = c.getAttribute('data-mchip'); render(); }); });
-    bindAction('nuevo-ajuste', openAjuste);
-    $$('[data-delmov]').forEach(function (b) { b.addEventListener('click', function () {
-      var id = b.getAttribute('data-delmov');
-      confirmar('Eliminar movimiento', 'El stock se recalcula sin este movimiento. ¿Continuar?', function () {
-        S.removeMovimiento(id); toast('Movimiento eliminado', 'ok'); render();
-      });
-    }); });
-  };
   function openAjuste() {
     var arts = S.getArticulos({ soloActivos: true });
     if (!arts.length) { toast('Primero creá un artículo', 'warn'); return; }
@@ -835,11 +548,11 @@
     var body = '<form class="form" id="ajForm">' +
       field('Artículo', '<select class="select" id="ajArt">' + opts + '</select>', true) +
       '<div class="form-grid">' +
-      field('Cantidad', '<input class="input" id="ajCant" type="number" step="1" value="0" placeholder="Use negativo para descontar">') +
+      field('Cantidad', '<input class="input" id="ajCant" type="number" step="1" value="0" placeholder="Negativo para descontar">') +
       field('Fecha', '<input class="input" id="ajFecha" type="date" value="' + S.hoyISO() + '">') +
       '</div>' +
-      field('Nota <span class="opt">(opcional)</span>', '<input class="input" id="ajNota" placeholder="Ej: rotura, faltante, corrección de inventario">', true) +
-      '<div class="hint">Un ajuste suma o resta cajas directamente (por roturas, vencimientos, recuentos). Usá número negativo para descontar.</div>' +
+      field('Nota <span class="opt">(opcional)</span>', '<input class="input" id="ajNota" placeholder="Ej: rotura, faltante, recuento">', true) +
+      '<div class="hint">Un ajuste suma o resta cajas directamente (roturas, vencimientos, recuentos). Usá número negativo para descontar.</div>' +
       '<div class="form-actions"><button type="button" class="btn btn--ghost" data-close>Cancelar</button>' +
       '<button type="submit" class="btn btn--primary">Guardar ajuste</button></div></form>';
     openModal('Ajuste manual de stock', body);
@@ -853,12 +566,126 @@
   }
 
   /* ============================================================
-     CONFIGURACIÓN
+     ARTÍCULO · detalle + edición (desde Stocks)
+     ============================================================ */
+  function openArticulo(id) {
+    var a = id ? S.getArticulo(id) : null;
+    var foto = a ? a.foto : '';
+    var stock = a ? S.stockActual(id) : 0;
+    var resumen = '';
+    if (a) {
+      var e = S.estado(a, stock);
+      resumen = '<div class="stats" style="margin-bottom:16px;">' +
+        miniStat('Stock hoy', e === 'sin' ? '0' : fmtInt(stock)) +
+        miniStat('Punto de pedido', fmtInt(S.puntoPedido(a))) +
+        miniStat('Sugerido', fmtInt(S.sugerido(a, stock))) +
+        miniStat('Prom. mensual', fmtInt(S.promedioMensual(a))) +
+        '</div>';
+    }
+    var body = '' +
+      (a ? resumen : '') +
+      '<form class="form" id="artForm">' +
+      '<div class="imgdrop" id="imgdrop">' +
+      '<img class="imgdrop__preview" id="imgPreview" src="' + esc(foto || S.placeholder(a ? a.nombre : 'Nuevo')) + '" alt="">' +
+      '<div class="imgdrop__text"><strong>Foto del artículo</strong><span>Tocá para subir una imagen (JPG/PNG). Se optimiza sola.</span></div>' +
+      '<input type="file" id="imgInput" accept="image/*" hidden>' +
+      '</div>' +
+      '<input type="hidden" id="fFoto" value="' + esc(foto) + '">' +
+      '<div class="form-grid">' +
+      field('Nombre', '<input class="input" id="fNombre" value="' + esc(a ? a.nombre : '') + '" placeholder="Ej: Pelador mango plástico" required>', true) +
+      field('Código / SKU <span class="opt">(opcional)</span>', '<input class="input" id="fCodigo" value="' + esc(a ? a.codigo : '') + '" placeholder="Ej: 505">') +
+      field('Stock inicial', '<input class="input" id="fInicial" type="number" min="0" step="1" value="' + (a ? a.stockInicial : 0) + '">') +
+      field('Descripción <span class="opt">(opcional)</span>', '<textarea class="textarea" id="fDesc" placeholder="Detalle…">' + esc(a ? a.descripcion : '') + '</textarea>', true) +
+      field('Promedio mensual <span class="opt">(en blanco = auto)</span>', '<input class="input" id="fProm" type="number" min="0" step="0.5" value="' + (a && a.promedioManual != null ? a.promedioManual : '') + '" placeholder="' + (a ? fmtInt(S.promedioMensualAuto(a)) : '0') + '">') +
+      field('Meses de cobertura <span class="opt">(en blanco = global)</span>', '<input class="input" id="fMeses" type="number" min="0" step="0.5" value="' + (a && a.mesesPedido != null ? a.mesesPedido : '') + '" placeholder="' + esc(S.getMeta().mesesPedidoDefault) + '">') +
+      field('Precio unitario <span class="opt">(opcional)</span>', '<div class="input-prefix"><span>$</span><input class="input" id="fPrecio" type="number" min="0" step="0.01" value="' + (a ? a.precio : 0) + '"></div>') +
+      '</div>' +
+      '<div class="hint">El <strong>punto de pedido</strong> se calcula como promedio mensual × meses de cobertura. Dejá los campos en blanco para usar el promedio automático y los meses globales.</div>' +
+      '<div class="form-actions">' +
+      (a ? '<button type="button" class="btn btn--ghost" id="fVerMov">Ver movimientos</button>' : '') +
+      (a ? '<button type="button" class="btn btn--danger" id="fEliminar">Eliminar</button>' : '') +
+      '<div style="flex:1"></div>' +
+      '<button type="button" class="btn btn--ghost" data-close>Cancelar</button>' +
+      '<button type="submit" class="btn btn--primary">' + iconSave() + '<span>Guardar</span></button>' +
+      '</div></form>';
+    openModal(a ? 'Artículo' : 'Nuevo artículo', body);
+
+    var preview = $('#imgPreview'), fFoto = $('#fFoto'), fNombre = $('#fNombre');
+    $('#imgdrop').addEventListener('click', function () { $('#imgInput').click(); });
+    $('#imgInput').addEventListener('change', function (e) {
+      var file = e.target.files[0];
+      if (!file) return;
+      comprimirImagen(file, function (dataUrl) { fFoto.value = dataUrl; preview.src = dataUrl; });
+    });
+    if (!foto) fNombre.addEventListener('input', function () { if (!fFoto.value) preview.src = S.placeholder(fNombre.value || 'Nuevo'); });
+
+    if (a) $('#fVerMov').addEventListener('click', function () {
+      closeModal(); ui.expanded[a.id] = true; pendingExpand = a.id; location.hash = '#/movimientos'; setView('movimientos');
+    });
+    if (a) $('#fEliminar').addEventListener('click', function () {
+      confirmar('Eliminar artículo', '¿Eliminar «' + a.nombre + '» y todos sus movimientos? Esta acción no se puede deshacer.', function () {
+        S.removeArticulo(a.id); closeModal(); toast('Artículo eliminado', 'ok'); render();
+      });
+    });
+    $('#artForm').addEventListener('submit', function (e) {
+      e.preventDefault();
+      var data = {
+        nombre: fNombre.value, codigo: $('#fCodigo').value, descripcion: $('#fDesc').value,
+        foto: fFoto.value, precio: $('#fPrecio').value, stockInicial: $('#fInicial').value,
+        promedioManual: $('#fProm').value === '' ? null : $('#fProm').value,
+        mesesPedido: $('#fMeses').value === '' ? null : $('#fMeses').value
+      };
+      if (!data.nombre.trim()) { toast('Poné un nombre al artículo', 'warn'); return; }
+      if (a) { S.updateArticulo(a.id, data); toast('Artículo actualizado', 'ok'); }
+      else { S.addArticulo(data); toast('Artículo creado', 'ok'); }
+      closeModal(); render();
+    });
+  }
+  function miniStat(label, value) {
+    return '<div class="stat tone-primary" style="padding:14px;"><div class="stat__label">' + esc(label) + '</div><div class="stat__value" style="font-size:22px;">' + value + '</div></div>';
+  }
+
+  /* ---------- Impresión del pedido sugerido ---------- */
+  function imprimirSugerido() {
+    var sug = S.pedidoSugerido();
+    if (!sug.length) { toast('No hay nada para reponer', 'info'); return; }
+    var meta = S.getMeta();
+    var totalU = sug.reduce(function (acc, x) { return acc + x.sugerido; }, 0);
+    var rows = sug.map(function (x) {
+      var a = x.articulo;
+      return '<tr><td>' + esc(a.codigo || '') + '</td><td>' + esc(a.nombre) + '</td>' +
+        '<td style="text-align:right">' + fmtInt(x.stock) + '</td>' +
+        '<td style="text-align:right">' + fmtInt(x.punto) + '</td>' +
+        '<td style="text-align:right"><strong>' + fmtInt(x.sugerido) + '</strong></td></tr>';
+    }).join('');
+    var html = '<!DOCTYPE html><html lang="es"><head><meta charset="utf-8"><title>Pedido sugerido</title>' +
+      '<style>body{font-family:Inter,Arial,sans-serif;color:#1c2233;margin:40px;}h1{font-size:22px;margin:0 0 2px;}' +
+      '.muted{color:#6b7390;}table{width:100%;border-collapse:collapse;margin-top:18px;}' +
+      'th,td{padding:9px 10px;border-bottom:1px solid #e3e6f0;font-size:13px;text-align:left;}' +
+      'th{background:#f5f6fb;text-transform:uppercase;font-size:11px;letter-spacing:.04em;color:#6b7390;}' +
+      '.head{display:flex;justify-content:space-between;align-items:flex-start;border-bottom:2px solid #4f46e5;padding-bottom:14px;}' +
+      '.tot{margin-top:14px;text-align:right;font-size:15px;font-weight:700;}.brand{font-size:13px;color:#4f46e5;font-weight:700;}</style></head><body>' +
+      '<div class="head"><div><div class="brand">PEDIDO SUGERIDO</div><h1>' + esc(meta.empresa || 'Mi Empresa') + '</h1>' +
+      (meta.cliente ? '<div class="muted">Cliente: ' + esc(meta.cliente) + '</div>' : '') + '</div>' +
+      '<div class="muted" style="text-align:right">Fecha: ' + fmtFecha(S.hoyISO()) + '</div></div>' +
+      '<table><thead><tr><th>Código</th><th>Artículo</th><th style="text-align:right">Stock hoy</th>' +
+      '<th style="text-align:right">Punto</th><th style="text-align:right">A pedir</th></tr></thead>' +
+      '<tbody>' + rows + '</tbody></table>' +
+      '<div class="tot">Total cajas a pedir: ' + fmtInt(totalU) + '</div>' +
+      '<p class="muted" style="margin-top:40px;font-size:12px;">Generado con StockRotativo · ' + fmtFecha(S.hoyISO()) + '</p>' +
+      '</body></html>';
+    var w = window.open('', '_blank');
+    if (!w) { toast('Permití las ventanas emergentes para imprimir', 'warn'); return; }
+    w.document.write(html); w.document.close();
+    setTimeout(function () { w.focus(); w.print(); }, 350);
+  }
+
+  /* ============================================================
+     MÓDULO · CONFIGURACIÓN
      ============================================================ */
   function renderConfig() {
     var m = S.getMeta();
     var html = '<div class="grid-2">';
-    // Datos del negocio
     html += '<div class="card"><div class="card__head"><h2>Datos del negocio</h2></div><div class="card__body">' +
       '<form class="form" id="cfgForm">' +
       field('Nombre de tu empresa', '<input class="input" id="cEmpresa" value="' + esc(m.empresa) + '">', true) +
@@ -868,12 +695,11 @@
         ['ARS', 'USD', 'EUR', 'CLP', 'MXN', 'UYU', 'COP', 'PEN', 'BRL'].map(function (x) {
           return '<option value="' + x + '"' + (m.moneda === x ? ' selected' : '') + '>' + x + '</option>';
         }).join('') + '</select>') +
-      field('Meses del historial', '<input class="input" id="cPeriodo" type="number" min="1" step="1" value="' + (m.periodoMeses || 17) + '">') +
+      field('Meses del historial de ventas', '<input class="input" id="cPeriodo" type="number" min="1" step="1" value="' + esc(m.periodoMeses) + '">') +
       '</div>' +
-      '<div class="hint">«Meses del historial» es el período que abarca el total de compras de cada artículo. Se usa para calcular el promedio por quincena.</div>' +
+      '<div class="hint">«Meses del historial» es el período que abarcan las ventas conocidas de cada artículo; se usa para el promedio mensual automático.</div>' +
       '<div class="form-actions"><button type="submit" class="btn btn--primary">Guardar cambios</button></div>' +
       '</form></div></div>';
-    // Datos / respaldo
     html += '<div class="card"><div class="card__head"><h2>Datos y respaldo</h2></div><div class="card__body">' +
       '<p class="muted" style="margin-bottom:14px;line-height:1.5;">Tus datos se guardan en este navegador. Descargá un respaldo periódicamente o pasalo a otra computadora.</p>' +
       '<div class="row" style="gap:10px;">' +
@@ -883,17 +709,17 @@
       '</div>' +
       '<div style="height:1px;background:var(--line);margin:18px 0;"></div>' +
       '<div class="row" style="gap:10px;">' +
-      btn('demo', 'ghost', '', 'Cargar datos de ejemplo') +
+      btn('demo', 'ghost', '', 'Cargar catálogo de ejemplo') +
       btn('reset', 'danger', '', 'Borrar todo') +
       '</div></div></div>';
     html += '</div>';
 
     html += '<div class="card" style="margin-top:18px;"><div class="card__head"><h2>¿Cómo funciona?</h2></div><div class="card__body">' +
       '<ol style="margin:0;padding-left:20px;line-height:1.9;color:var(--muted);">' +
-      '<li><strong style="color:var(--text)">Cargá tus artículos</strong> con foto, stock inicial, stock máximo y punto de pedido.</li>' +
-      '<li>Cada 15 días, en <strong style="color:var(--text)">Cargar ventas</strong>, ingresá lo que vendió el cliente. El stock baja solo.</li>' +
-      '<li>Cuando un artículo llega al punto de pedido, aparece en <strong style="color:var(--text)">Pedido sugerido</strong>.</li>' +
-      '<li>Confirmás el pedido, lo imprimís y, al entregar, lo marcás como <strong style="color:var(--text)">entregado</strong>: el stock se repone automáticamente.</li>' +
+      '<li><strong style="color:var(--text)">Stocks</strong>: ves el stock de hoy, el punto de pedido y el pedido sugerido de cada artículo.</li>' +
+      '<li><strong style="color:var(--text)">Movimientos</strong>: inicial + entregas de Loeke − ventas de OSA = stock hoy. Tocá un artículo para ver su saldo.</li>' +
+      '<li><strong style="color:var(--text)">Punto de pedido</strong>: promedio de ventas × meses de cobertura. Lo ajustás global o por artículo.</li>' +
+      '<li><strong style="color:var(--text)">Entregas Loeke</strong> y <strong style="color:var(--text)">Ventas OSA</strong>: cargás el movimiento y el stock se actualiza solo.</li>' +
       '</ol></div></div>';
 
     html += '<p class="muted text-c" style="margin-top:20px;font-size:12px;">StockRotativo · versión ' + APP_VERSION + '</p>';
@@ -909,10 +735,9 @@
     bindAction('export', exportar);
     bindAction('import', function () { $('#importFile').click(); });
     $('#importFile').addEventListener('change', importar);
-    // 'demo' lo maneja la delegación global
     bindAction('reset', function () {
       confirmar('Borrar todo', 'Se eliminarán TODOS los artículos, movimientos y pedidos de este navegador. ¿Seguro?', function () {
-        S.resetAll(); toast('Datos borrados', 'ok'); location.hash = '#/panel'; setView('panel');
+        S.resetAll(); toast('Datos borrados', 'ok'); location.hash = '#/stocks'; setView('stocks');
       });
     });
   };
@@ -935,8 +760,8 @@
     reader.readAsText(file);
   }
   function cargarDemo() {
-    confirmar('Cargar ejemplo', 'Esto reemplaza los datos actuales con un set de ejemplo para probar la app. ¿Continuar?', function () {
-      S.loadDemo(); toast('Datos de ejemplo cargados', 'ok'); updateBrand(); location.hash = '#/panel'; setView('panel');
+    confirmar('Cargar ejemplo', 'Esto reemplaza los datos actuales con el catálogo de ejemplo (Loekemeyer · OSA). ¿Continuar?', function () {
+      S.loadDemo(); toast('Catálogo de ejemplo cargado', 'ok'); updateBrand(); location.hash = '#/stocks'; setView('stocks');
     });
   }
 
@@ -956,7 +781,6 @@
     openModal(titulo, body);
     $('#confirmYes').addEventListener('click', function () { closeModal(); onYes(); });
   }
-
   // Compresión de imagen en el navegador (redimensiona a máx 760px y exporta JPEG)
   function comprimirImagen(file, cb) {
     var reader = new FileReader();
@@ -984,12 +808,13 @@
     var t = e.target.closest('[data-action]');
     if (!t) return;
     var act = t.getAttribute('data-action');
-    if (act === 'nuevo-art') openArticuloForm(null);
+    if (act === 'nuevo-art') openArticulo(null);
+    else if (act === 'print-sugerido') imprimirSugerido();
+    else if (act === 'guardar-punto') guardarPunto();
     else if (act === 'guardar-ventas') guardarCarga(true);
     else if (act === 'guardar-entregas') guardarCarga(false);
+    else if (act === 'nuevo-ajuste') openAjuste();
     else if (act === 'demo') cargarDemo();
-    else if (act === 'print-sugerido') imprimirSugerido();
-    else if (act === 'guardar-inicial') guardarInicial();
   });
 
   /* ---------- Init ---------- */
@@ -1006,7 +831,7 @@
       toast('No se pudo guardar: el almacenamiento del navegador está lleno. Descargá un respaldo y quitá fotos pesadas.', 'danger');
     });
     var v = (location.hash || '').replace('#/', '');
-    setView(v || 'panel');
+    setView(v || 'stocks');
   }
   init();
 })();

@@ -7,18 +7,23 @@ cuánto se vendió y cuándo conviene reponer — todo automático.
 
 ## ✨ ¿Cómo funciona?
 
-La lógica es la que pediste:
-
 ```
-Stock actual = Stock inicial + Entregas (las cargás vos) − Ventas (las informa el cliente)
+Stock hoy = Stock inicial + Entregas de Loeke − Ventas de OSA
 ```
 
-1. **Cargás tus artículos** con foto, descripción, *stock inicial*, *stock máximo* y *punto de pedido*.
-2. **Cada 15 días** ingresás en **Cargar ventas** lo que el cliente vendió. El stock baja solo.
-3. Cuando un artículo llega a su **punto de pedido**, aparece en **Pedido sugerido**, con la
-   cantidad exacta para volver al **stock máximo**.
-4. Confirmás el pedido, lo **imprimís** y, al entregarlo, lo marcás como *entregado*:
-   el stock se repone automáticamente.
+La app está organizada en **5 módulos**:
+
+1. **Stocks** — el stock de hoy, el *punto de pedido* y el *pedido sugerido* de cada artículo.
+2. **Movimientos** — `inicial + entregas − ventas = stock hoy`. Tocás un artículo y ves cada
+   movimiento con el **saldo** resultante (filtrable por período).
+3. **Punto de pedido** — `promedio de ventas × meses de cobertura`. El promedio es automático
+   (o lo sobrescribís) y los meses son globales (o por artículo).
+4. **Entregas Loeke** — lo que Loeke entrega a OSA (entra al stock). Carga manual;
+   *importación por Excel próximamente*.
+5. **Ventas OSA** — lo que OSA vende a sus clientes (sale del stock). Carga manual;
+   *importación por PDF próximamente*.
+
+El **pedido sugerido** es `punto de pedido − stock hoy`, cuando da positivo.
 
 ## 🖥️ Usarla
 

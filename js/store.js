@@ -22,10 +22,12 @@
         empresa: 'Mi Empresa',
         cliente: '',
         moneda: 'ARS',
-        periodoMeses: 17, // meses que abarca el "total histórico" (para el promedio por quincena)
+        periodoMeses: 17,       // meses que abarca el total de ventas conocidas (base del promedio mensual)
+        mesesPedidoDefault: 2,  // meses de cobertura deseados por defecto (punto de pedido = promedio x meses)
         creado: Date.now()
       },
-      articulos: [], // {id,codigo,nombre,descripcion,foto,precio,stockInicial,stockMaximo,puntoPedido,totalHistorico,activo}
+      // Artículo: promedioManual y mesesPedido son overrides opcionales (null = usar el automático/global).
+      articulos: [], // {id,codigo,nombre,descripcion,foto,precio,stockInicial,totalHistorico,promedioManual,mesesPedido,activo}
       movimientos: [], // {id,articuloId,tipo,cantidad,fecha,nota}
       pedidos: [] // {id,fecha,estado,nota,items:[{articuloId,codigo,nombre,cantidad}]}
     };
@@ -70,6 +72,13 @@
     if (isNaN(n)) return def === undefined ? 0 : def;
     return n;
   }
+  // Override opcional: '' / null / no-numérico => null (usar el valor automático/global).
+  function optNum(v) {
+    if (v === null || v === undefined || v === '') return null;
+    var n = parseFloat(v);
+    if (isNaN(n)) return null;
+    return Math.max(0, n);
+  }
 
   /* ---------- Meta ---------- */
   function getMeta() { return Object.assign({}, state.meta); }
@@ -98,9 +107,9 @@
       foto: data.foto || '',
       precio: num(data.precio, 0),
       stockInicial: Math.max(0, Math.round(num(data.stockInicial, 0))),
-      stockMaximo: Math.max(0, Math.round(num(data.stockMaximo, 0))),
-      puntoPedido: Math.max(0, Math.round(num(data.puntoPedido, 0))),
       totalHistorico: Math.max(0, Math.round(num(data.totalHistorico, 0))),
+      promedioManual: optNum(data.promedioManual), // override del promedio mensual (null = automático)
+      mesesPedido: optNum(data.mesesPedido),        // override de meses de cobertura (null = global)
       activo: data.activo !== false
     };
     state.articulos.push(a);
@@ -116,9 +125,9 @@
     if (data.foto !== undefined) a.foto = data.foto;
     if (data.precio !== undefined) a.precio = num(data.precio, 0);
     if (data.stockInicial !== undefined) a.stockInicial = Math.max(0, Math.round(num(data.stockInicial, 0)));
-    if (data.stockMaximo !== undefined) a.stockMaximo = Math.max(0, Math.round(num(data.stockMaximo, 0)));
-    if (data.puntoPedido !== undefined) a.puntoPedido = Math.max(0, Math.round(num(data.puntoPedido, 0)));
     if (data.totalHistorico !== undefined) a.totalHistorico = Math.max(0, Math.round(num(data.totalHistorico, 0)));
+    if (data.promedioManual !== undefined) a.promedioManual = optNum(data.promedioManual);
+    if (data.mesesPedido !== undefined) a.mesesPedido = optNum(data.mesesPedido);
     if (data.activo !== undefined) a.activo = !!data.activo;
     save();
     return a;
@@ -204,49 +213,69 @@
     });
     return t;
   }
-  // 'config' (sin stock máximo definido) | 'sin' | 'bajo' | 'ok'
-  function estado(a, stock) {
-    if (!a.stockMaximo || a.stockMaximo <= 0) return 'config';
-    if (stock === undefined) stock = stockActual(a.id);
-    if (stock <= 0) return 'sin';
-    if (stock <= (a.puntoPedido || 0)) return 'bajo';
-    return 'ok';
+  /* ---------- Punto de pedido y reposición (Módulos 1 y 3) ----------
+     Punto de pedido = promedio de ventas mensual x meses de cobertura deseados.
+     · Promedio: automático (totalHistorico / periodoMeses) salvo override manual.
+     · Meses:    global (meta.mesesPedidoDefault) salvo override por artículo.
+     Pedido sugerido = punto de pedido − stock hoy (cuando da positivo). */
+  function promedioMensualAuto(a) {
+    return (a.totalHistorico || 0) / Math.max(1, state.meta.periodoMeses || 1);
+  }
+  function promedioMensual(a) {
+    return (a.promedioManual != null) ? a.promedioManual : promedioMensualAuto(a);
+  }
+  function mesesPedido(a) {
+    return (a.mesesPedido != null) ? a.mesesPedido : (state.meta.mesesPedidoDefault || 0);
+  }
+  function puntoPedido(a) {
+    return Math.round(promedioMensual(a) * mesesPedido(a));
   }
   function sugerido(a, stock) {
     if (stock === undefined) stock = stockActual(a.id);
-    return Math.max(0, (a.stockMaximo || 0) - stock);
+    return Math.max(0, puntoPedido(a) - stock);
   }
   function necesitaPedido(a, stock) {
-    if (!a.stockMaximo || a.stockMaximo <= 0) return false; // sin máximo definido, no aplica
-    if (stock === undefined) stock = stockActual(a.id);
-    // Pedido = stock máximo - stock real. Genera pedido siempre que falte (incluido stock 0 o negativo).
     return sugerido(a, stock) > 0;
   }
-  // Lista de reposición sugerida (artículos activos que necesitan pedido)
+  // 'sin' (stock <= 0) | 'bajo' (por debajo del punto de pedido) | 'ok'
+  function estado(a, stock) {
+    if (stock === undefined) stock = stockActual(a.id);
+    if (stock <= 0) return 'sin';
+    if (stock < puntoPedido(a)) return 'bajo';
+    return 'ok';
+  }
+  // Lista de reposición sugerida (artículos activos con sugerido > 0)
   function pedidoSugerido() {
     var stocks = computeStocks();
     return getArticulos({ soloActivos: true })
       .filter(function (a) { return necesitaPedido(a, stocks[a.id]); })
       .map(function (a) {
-        return { articulo: a, stock: stocks[a.id], sugerido: sugerido(a, stocks[a.id]) };
+        return { articulo: a, stock: stocks[a.id], punto: puntoPedido(a), sugerido: sugerido(a, stocks[a.id]) };
       });
   }
 
-  /* ---------- Promedio de compra por quincena ---------- */
-  // El cliente compra "totalHistorico" en "periodoMeses" meses. 1 mes = 2 quincenas.
-  function quincenasPeriodo() { return Math.max(1, (state.meta.periodoMeses || 17) * 2); }
-  function promedioQuincena(a) { return (a.totalHistorico || 0) / quincenasPeriodo(); }
-  function promedioMes(a) { return (a.totalHistorico || 0) / Math.max(1, state.meta.periodoMeses || 17); }
-  // Ranking de artículos por compra promedio por quincena (mayor a menor)
-  function rankingCompras() {
-    return state.articulos.slice()
-      .sort(function (a, b) {
-        var d = (b.totalHistorico || 0) - (a.totalHistorico || 0);
-        return d !== 0 ? d : (a.nombre || '').localeCompare(b.nombre || '', 'es');
-      })
-      .map(function (a) {
-        return { articulo: a, total: a.totalHistorico || 0, promQuincena: promedioQuincena(a), promMes: promedioMes(a) };
+  /* ---------- Movimientos con saldo corrido (Módulo 2) ----------
+     Movimientos del artículo en orden cronológico, con el saldo resultante
+     después de cada uno (arrancando del stock inicial). opts.desde / opts.hasta
+     (ISO) filtran SOLO la ventana mostrada; el saldo se acumula desde el inicio. */
+  function movimientosConSaldo(articuloId, opts) {
+    opts = opts || {};
+    var a = getArticulo(articuloId);
+    var saldo = a ? (a.stockInicial || 0) : 0;
+    var movs = state.movimientos
+      .filter(function (m) { return m.articuloId === articuloId; })
+      .sort(function (x, y) {
+        if (x.fecha === y.fecha) return x.id < y.id ? -1 : 1;
+        return x.fecha < y.fecha ? -1 : 1;
       });
+    var out = [];
+    movs.forEach(function (m) {
+      saldo += (m.tipo === 'venta') ? -m.cantidad : m.cantidad;
+      if (opts.desde && m.fecha < opts.desde) return;
+      if (opts.hasta && m.fecha > opts.hasta) return;
+      out.push({ mov: m, saldo: saldo });
+    });
+    return out;
   }
 
   /* ---------- Pedidos ---------- */
@@ -439,19 +468,18 @@
     st.meta.cliente = 'Osa Distribuidora SRL';
     st.meta.moneda = 'ARS';
     st.meta.periodoMeses = 17;
+    st.meta.mesesPedidoDefault = 2;
     st.meta.seedVersion = SEED_VERSION;
-    var meses = st.meta.periodoMeses || 17;
     CATALOGO.forEach(function (row) {
       var codigo = row[0], nombre = row[1], total = row[2];
-      var promMes = total / meses;            // promedio de compra por mes
-      var max = Math.round(1.5 * promMes);    // stock máximo = 1.5 meses de demanda
       st.articulos.push({
         id: 'a_' + codigo, codigo: codigo, nombre: nombre, descripcion: '',
         foto: placeholder(nombre), precio: 0,
         stockInicial: STOCK_INICIAL[codigo] || 0, // stock real del cliente (Diferencia, informe 23/06/26)
-        stockMaximo: max,
-        puntoPedido: Math.round(promMes / 2), // referencia; el pedido repone hasta el máximo
-        totalHistorico: total, activo: true
+        totalHistorico: total,        // ventas conocidas en periodoMeses (base del promedio mensual)
+        promedioManual: null,         // sin override: usa el promedio automático
+        mesesPedido: null,            // sin override: usa meta.mesesPedidoDefault
+        activo: true
       });
     });
     return st;
@@ -461,10 +489,10 @@
   function loadDemo() { state = seedReal(); save(); }
 
   // Aplica un catálogo precargado nuevo SIN destruir los datos del usuario.
-  // - Actualiza los campos "del catálogo" (nombre, total, máximo, punto de pedido).
+  // - Actualiza los campos "del catálogo" (nombre, total de ventas conocidas).
   // - Agrega los artículos nuevos que tenga el catálogo.
   // - Conserva siempre movimientos, pedidos y los campos que toca el usuario
-  //   (descripción, foto, precio, activo).
+  //   (descripción, foto, precio, activo y los overrides promedioManual/mesesPedido).
   // - El stock inicial solo se pisa si todavía no hay nada que proteger: ni stock
   //   real cargado (meta.datosReales) ni movimientos/pedidos registrados. Si ya
   //   hay historial, pisarlo descuadraría el saldo, así que se respeta.
@@ -479,10 +507,11 @@
       if (!ex) { state.articulos.push(na); return; } // artículo nuevo del catálogo
       ex.nombre = na.nombre;
       ex.totalHistorico = na.totalHistorico;
-      ex.stockMaximo = na.stockMaximo;
-      ex.puntoPedido = na.puntoPedido;
+      if (ex.promedioManual === undefined) ex.promedioManual = null;
+      if (ex.mesesPedido === undefined) ex.mesesPedido = null;
       if (!protegerInicial) ex.stockInicial = na.stockInicial;
     });
+    if (state.meta.mesesPedidoDefault === undefined) state.meta.mesesPedidoDefault = 2;
     state.meta.seedVersion = SEED_VERSION;
     save();
   }
@@ -544,8 +573,10 @@
     addMovimiento: addMovimiento, addMovimientosBatch: addMovimientosBatch,
     getMovimientos: getMovimientos, removeMovimiento: removeMovimiento,
     computeStocks: computeStocks, stockActual: stockActual, totales: totales,
+    movimientosConSaldo: movimientosConSaldo,
     estado: estado, sugerido: sugerido, necesitaPedido: necesitaPedido, pedidoSugerido: pedidoSugerido,
-    promedioQuincena: promedioQuincena, promedioMes: promedioMes, rankingCompras: rankingCompras, quincenasPeriodo: quincenasPeriodo,
+    promedioMensual: promedioMensual, promedioMensualAuto: promedioMensualAuto,
+    mesesPedido: mesesPedido, puntoPedido: puntoPedido,
     crearPedido: crearPedido, getPedidos: getPedidos, getPedido: getPedido,
     marcarPedidoEntregado: marcarPedidoEntregado, eliminarPedido: eliminarPedido,
     exportData: exportData, importData: importData, resetAll: resetAll, loadDemo: loadDemo,
