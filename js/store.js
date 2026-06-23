@@ -10,7 +10,7 @@
   // fusiona (merge) en los navegadores existentes: actualiza nombres, totales y
   // máximos y agrega artículos nuevos, SIN borrar movimientos, pedidos ni el
   // stock real ya cargado (ver mergeSeed).
-  var SEED_VERSION = 7;
+  var SEED_VERSION = 8;
   // Versión del "stock inicial" precargado (columna Existencia). Al subirla, el
   // stock inicial real se reaplica una vez aunque ya haya movimientos (corrección
   // de baseline). Después vuelve a protegerse. Ver mergeSeed.
@@ -498,14 +498,18 @@
     ['360E', 'Rallador 4 lados a/l mango plástico', 6],
     ['594', 'Pinza de fideos mango plástico 25cm', 3],
     ['355', 'Pisa papas nylon con mango', 2],
-    ['524', 'Sacacorcho de espumantes', 2]
+    ['524', 'Sacacorcho de espumantes', 2],
+    // Sin historial de ventas (no figuran en el ranking), pero OSA tiene stock
+    // de ellos en el informe de Existencias: se agregan con total 0.
+    ['517', 'Pinza gastronómica de acero', 0],
+    ['946', 'Cuchara calada acero inoxidable', 0]
   ];
 
   // Stock inicial real del cliente (OSA) · informe "Existencias" del 23/06/26,
   // columna "Existencia" (stock físico). Total del informe: 30.388 cajas.
   // Códigos del informe = "L" + mi código (suele quitar la "E" final: L529 = 529E).
   // 525 y 580 se consolidan en su variante E. Lo que figura en blanco queda en 0.
-  // Nota: 517 (12) y 946 (120) del informe no están en el catálogo (ver mensaje).
+  // 517 y 946 se agregaron al catálogo (no tenían historial de ventas).
   var STOCK_INICIAL = {
     '031': 2112, '222': 32, '315': 18, '395': 144, '396': 6, '478E': 13, '501': 1020,
     '502': 780, '504': 1343, '505': 6108, '506': 2268, '507': 24, '508': 100, '510': 1044,
@@ -516,7 +520,7 @@
     '570': 14, '574E': 60, '577': 3, '579': 19, '580E': 12, '583E': 16, '587': 491,
     '589E': 1627, '594': 20, '598E': 161, '931E': 240, '932E': 226, '933E': 108,
     '934E': 241, '935E': 239, '936E': 314, '937E': 144, '941E': 120, '942E': 45, '944E': 5,
-    '948E': 10
+    '948E': 10, '517': 12, '946': 120
   };
 
   // Construye el estado inicial con el catálogo real precargado.
