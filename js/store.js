@@ -6,9 +6,14 @@
   'use strict';
 
   var KEY = 'stockrotativo.v1';
-  // Versión del catálogo/seed precargado. Al subirla, el seed nuevo se aplica
-  // solo en navegadores que todavía NO cargaron datos reales (meta.datosReales).
+  // Versión del catálogo/seed precargado. Al subirla, el catálogo nuevo se
+  // fusiona (merge) en los navegadores existentes: actualiza nombres, totales y
+  // máximos y agrega artículos nuevos, SIN borrar movimientos, pedidos ni el
+  // stock real ya cargado (ver mergeSeed).
   var SEED_VERSION = 5;
+  // Handler opcional que registra la capa de UI para avisar si falla un guardado
+  // (p. ej. localStorage lleno). Ver setSaveErrorHandler.
+  var onSaveError = null;
 
   /* ---------- Estado base ---------- */
   function blank() {
@@ -49,6 +54,9 @@
       return true;
     } catch (e) {
       console.error('No se pudo guardar:', e);
+      if (typeof onSaveError === 'function') {
+        try { onSaveError(e); } catch (_) {}
+      }
       return false;
     }
   }
@@ -141,8 +149,18 @@
     for (var i = 0; i < arr.length; i++) {
       var c = Math.round(num(arr[i].cantidad, 0));
       if (c === 0) continue;
-      creados.push(addMovimiento(arr[i]));
+      var mov = {
+        id: uid(),
+        articuloId: arr[i].articuloId,
+        tipo: arr[i].tipo,
+        cantidad: c,
+        fecha: arr[i].fecha || hoyISO(),
+        nota: (arr[i].nota || '').trim()
+      };
+      state.movimientos.push(mov);
+      creados.push(mov);
     }
+    if (creados.length) save(); // un solo guardado para todo el lote
     return creados;
   }
   function getMovimientos(filter) {
@@ -442,6 +460,33 @@
   // Botón "Cargar datos de ejemplo" = restaurar el catálogo real.
   function loadDemo() { state = seedReal(); save(); }
 
+  // Aplica un catálogo precargado nuevo SIN destruir los datos del usuario.
+  // - Actualiza los campos "del catálogo" (nombre, total, máximo, punto de pedido).
+  // - Agrega los artículos nuevos que tenga el catálogo.
+  // - Conserva siempre movimientos, pedidos y los campos que toca el usuario
+  //   (descripción, foto, precio, activo).
+  // - El stock inicial solo se pisa si todavía no hay nada que proteger: ni stock
+  //   real cargado (meta.datosReales) ni movimientos/pedidos registrados. Si ya
+  //   hay historial, pisarlo descuadraría el saldo, así que se respeta.
+  function mergeSeed() {
+    var fresh = seedReal();
+    var protegerInicial = !!state.meta.datosReales ||
+      state.movimientos.length > 0 || state.pedidos.length > 0;
+    var byCode = {};
+    state.articulos.forEach(function (a) { if (a.codigo) byCode[a.codigo] = a; });
+    fresh.articulos.forEach(function (na) {
+      var ex = na.codigo ? byCode[na.codigo] : null;
+      if (!ex) { state.articulos.push(na); return; } // artículo nuevo del catálogo
+      ex.nombre = na.nombre;
+      ex.totalHistorico = na.totalHistorico;
+      ex.stockMaximo = na.stockMaximo;
+      ex.puntoPedido = na.puntoPedido;
+      if (!protegerInicial) ex.stockInicial = na.stockInicial;
+    });
+    state.meta.seedVersion = SEED_VERSION;
+    save();
+  }
+
   /* ---------- Utilidades ---------- */
   function hoyISO() {
     var d = new Date();
@@ -483,13 +528,12 @@
 
   // Inicializa el estado (luego de definir catálogo, ventas y seed)
   var state = load();
-  // Migración por versión de seed: si el catálogo precargado cambió y este
-  // navegador todavía no tiene datos reales, se aplica el seed nuevo solo.
-  // Una vez cargado el stock inicial real (meta.datosReales = true) no se toca.
+  // Migración por versión de seed: si el catálogo precargado cambió, se fusiona
+  // de forma NO destructiva (ver mergeSeed). Nunca borra movimientos, pedidos ni
+  // el stock real ya cargado.
   (function ensureSeed() {
     if (state.meta.seedVersion === SEED_VERSION) return;
-    if (!state.meta.datosReales) { state = seedReal(); save(); }
-    else { state.meta.seedVersion = SEED_VERSION; save(); }
+    mergeSeed();
   })();
 
   /* ---------- API pública ---------- */
@@ -505,6 +549,7 @@
     crearPedido: crearPedido, getPedidos: getPedidos, getPedido: getPedido,
     marcarPedidoEntregado: marcarPedidoEntregado, eliminarPedido: eliminarPedido,
     exportData: exportData, importData: importData, resetAll: resetAll, loadDemo: loadDemo,
+    setSaveErrorHandler: function (fn) { onSaveError = fn; },
     placeholder: placeholder, hoyISO: hoyISO
   };
 })();

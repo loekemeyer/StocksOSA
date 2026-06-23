@@ -5,7 +5,7 @@
   'use strict';
 
   var S = window.Store;
-  var APP_VERSION = '1.0.8';
+  var APP_VERSION = '1.0.9';
 
   /* ---------- Estado de UI ---------- */
   var ui = {
@@ -40,7 +40,8 @@
   }
   // Sin separadores de miles ni comas (números "planos"). Sin decimales (redondeado).
   function fmtInt(n) { return String(Math.round(n || 0)); }
-  function fmtDec(n) { return String(Math.round(n || 0)); }
+  // Alias histórico: los promedios también se muestran redondeados (sin decimales).
+  function fmtDec(n) { return fmtInt(n); }
   function fmtMoney(n) {
     var m = S.getMeta().moneda || 'ARS';
     try { return new Intl.NumberFormat('es-AR', { style: 'currency', currency: m, maximumFractionDigits: 0 }).format(n || 0); }
@@ -52,7 +53,9 @@
     if (p.length !== 3) return iso;
     return p[2] + '/' + p[1] + '/' + p[0];
   }
-  function fotoDe(a) { return a.foto || S.placeholder(a.nombre); }
+  // Se escapa: la foto puede venir de un respaldo importado y se interpola
+  // directamente en src="...". Sin escapar sería una vía de inyección.
+  function fotoDe(a) { return esc(a.foto || S.placeholder(a.nombre)); }
 
   /* ---------- Toast ---------- */
   var ICON = {
@@ -390,7 +393,7 @@
     var body = '' +
       '<form class="form" id="artForm">' +
       '<div class="imgdrop" id="imgdrop">' +
-      '<img class="imgdrop__preview" id="imgPreview" src="' + (foto || S.placeholder(a ? a.nombre : 'Nuevo')) + '" alt="">' +
+      '<img class="imgdrop__preview" id="imgPreview" src="' + esc(foto || S.placeholder(a ? a.nombre : 'Nuevo')) + '" alt="">' +
       '<div class="imgdrop__text"><strong>Foto del artículo</strong><span>Tocá para subir una imagen (JPG/PNG). Se optimiza sola.</span></div>' +
       '<input type="file" id="imgInput" accept="image/*" hidden>' +
       '</div>' +
@@ -430,7 +433,7 @@
     if (!foto) fNombre.addEventListener('input', function () { if (!fFoto.value) preview.src = S.placeholder(fNombre.value || 'Nuevo'); });
 
     if (a) $('#fEliminar').addEventListener('click', function () {
-      confirmar('Eliminar artículo', '¿Eliminar «' + esc(a.nombre) + '» y todos sus movimientos? Esta acción no se puede deshacer.', function () {
+      confirmar('Eliminar artículo', '¿Eliminar «' + a.nombre + '» y todos sus movimientos? Esta acción no se puede deshacer.', function () {
         S.removeArticulo(a.id); closeModal(); toast('Artículo eliminado', 'ok'); render();
       });
     });
@@ -947,7 +950,7 @@
     $$('[data-action="' + action + '"]').forEach(function (b) { b.addEventListener('click', fn); });
   }
   function confirmar(titulo, mensaje, onYes) {
-    var body = '<p style="line-height:1.55;color:var(--muted);margin-bottom:20px;">' + mensaje + '</p>' +
+    var body = '<p style="line-height:1.55;color:var(--muted);margin-bottom:20px;">' + esc(mensaje) + '</p>' +
       '<div class="form-actions"><button class="btn btn--ghost" data-close>Cancelar</button>' +
       '<button class="btn btn--primary" id="confirmYes">Confirmar</button></div>';
     openModal(titulo, body);
@@ -993,6 +996,15 @@
   function init() {
     var vEl = $('#appVersion');
     if (vEl) vEl.textContent = 'v' + APP_VERSION;
+    // Aviso si falla un guardado (p. ej. localStorage lleno). Con throttle para
+    // no apilar toasts si fallan varios guardados seguidos.
+    var ultErr = 0;
+    S.setSaveErrorHandler(function () {
+      var ahora = Date.now();
+      if (ahora - ultErr < 3000) return;
+      ultErr = ahora;
+      toast('No se pudo guardar: el almacenamiento del navegador está lleno. Descargá un respaldo y quitá fotos pesadas.', 'danger');
+    });
     var v = (location.hash || '').replace('#/', '');
     setView(v || 'panel');
   }
