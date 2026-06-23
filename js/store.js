@@ -10,11 +10,15 @@
   // fusiona (merge) en los navegadores existentes: actualiza nombres, totales y
   // máximos y agrega artículos nuevos, SIN borrar movimientos, pedidos ni el
   // stock real ya cargado (ver mergeSeed).
-  var SEED_VERSION = 6;
+  var SEED_VERSION = 7;
+  // Versión del "stock inicial" precargado (columna Existencia). Al subirla, el
+  // stock inicial real se reaplica una vez aunque ya haya movimientos (corrección
+  // de baseline). Después vuelve a protegerse. Ver mergeSeed.
+  var STOCK_BASELINE = 1;
   // Artículos duplicados (mismo producto con código base y +E) que deben quedar
   // como uno solo: [idDuplicado, idCanónico]. Al fusionar se mueven los
   // movimientos y se suma el stock inicial al canónico. Ver mergeSeed.
-  var FUSIONAR = [['a_580', 'a_580E']];
+  var FUSIONAR = [['a_580', 'a_580E'], ['a_525', 'a_525E']];
   // Handler opcional que registra la capa de UI para avisar si falla un guardado
   // (p. ej. localStorage lleno). Ver setSaveErrorHandler.
   var onSaveError = null;
@@ -440,11 +444,10 @@
     ['246', 'Prensa matambre', 81],
     ['511', 'Abrelatas uña 3 en 1', 80],
     ['564', 'Corta pizza 8cm mango madera', 78],
-    ['525E', 'Sacacorcho cabo de madera', 75],
+    ['525E', 'Sacacorcho cabo de madera', 130], // 525 y 525E son el mismo artículo (75 + 55)
     ['542', 'Ahueca papas', 69],
     ['580E', 'Batidor mini', 131], // 580 y 580E son el mismo artículo: se fusionan (68 + 63)
     ['280', 'Manga repostera + 4 boquillas', 60],
-    ['525', 'Sacacorcho cabo madera', 55],
     ['811E', 'Corta pizza mango ergonómico Ø9cm', 50],
     ['543', 'Ahueca frutas', 42],
     ['935E', 'Espátula calada nylon mango madera', 40],
@@ -498,23 +501,22 @@
     ['524', 'Sacacorcho de espumantes', 2]
   ];
 
-  // Stock inicial real del cliente (OSA) · informe del 23/06/26, columna
-  // "Diferencia" (Existencia menos lo comprometido: NP + FA).
-  // Códigos del informe = "L" + mi código, sin la "E" final (ej. mi 529E = L529).
-  // Excepción: algunos conservan la E (ej. 948E = L948E). Lo que no figura,
-  // vino en blanco o dio negativo (ej. 583E: -20) queda en 0.
+  // Stock inicial real del cliente (OSA) · informe "Existencias" del 23/06/26,
+  // columna "Existencia" (stock físico). Total del informe: 30.388 cajas.
+  // Códigos del informe = "L" + mi código (suele quitar la "E" final: L529 = 529E).
+  // 525 y 580 se consolidan en su variante E. Lo que figura en blanco queda en 0.
+  // Nota: 517 (12) y 946 (120) del informe no están en el catálogo (ver mensaje).
   var STOCK_INICIAL = {
-    '031': 2100, '222': 32, '315': 18, '395': 144, '396': 6, '478E': 13,
-    '501': 1020, '502': 780, '504': 1343, '505': 6072, '506': 2232, '507': 24,
-    '508': 100, '510': 1044, '511': 11, '512': 2, '513': 5361, '515': 48,
-    '518': 474, '519': 1220, '520': 150, '521': 336, '522E': 4, '523': 218,
-    '525E': 149, '529E': 85, '530': 252, '531': 360, '536E': 18, '540E': 17,
-    '542': 185, '543': 84, '544': 677, '546': 636, '548': 23, '551': 2,
-    '559': 96, '560': 4, '561': 4, '562': 276, '564': 9, '566E': 386,
-    '569': 12, '570': 14, '574E': 36, '577': 3, '579': 19, '587': 491,
-    '589E': 1627, '594': 20, '598E': 137, '931E': 240, '932E': 226, '933E': 108,
-    '934E': 241, '935E': 239, '936E': 314, '937E': 138, '941E': 120, '942E': 45,
-    '944E': 5, '948E': 10
+    '031': 2112, '222': 32, '315': 18, '395': 144, '396': 6, '478E': 13, '501': 1020,
+    '502': 780, '504': 1343, '505': 6108, '506': 2268, '507': 24, '508': 100, '510': 1044,
+    '511': 11, '512': 2, '513': 5364, '515': 48, '518': 474, '519': 1220, '520': 150,
+    '521': 336, '522E': 4, '523': 218, '525E': 149, '529E': 88, '530': 252, '531': 360,
+    '536E': 18, '540E': 17, '542': 185, '543': 84, '544': 677, '546': 660, '548': 23,
+    '551': 2, '559': 96, '560': 4, '561': 4, '562': 276, '564': 9, '566E': 386, '569': 12,
+    '570': 14, '574E': 60, '577': 3, '579': 19, '580E': 12, '583E': 16, '587': 491,
+    '589E': 1627, '594': 20, '598E': 161, '931E': 240, '932E': 226, '933E': 108,
+    '934E': 241, '935E': 239, '936E': 314, '937E': 144, '941E': 120, '942E': 45, '944E': 5,
+    '948E': 10
   };
 
   // Construye el estado inicial con el catálogo real precargado.
@@ -526,6 +528,7 @@
     st.meta.periodoMeses = 17;
     st.meta.mesesPedidoDefault = 2;
     st.meta.seedVersion = SEED_VERSION;
+    st.meta.stockBaseline = STOCK_BASELINE;
     CATALOGO.forEach(function (row) {
       var codigo = row[0], nombre = row[1], total = row[2];
       st.articulos.push({
@@ -556,6 +559,10 @@
     var fresh = seedReal();
     var protegerInicial = !!state.meta.datosReales ||
       state.movimientos.length > 0 || state.pedidos.length > 0;
+    // Si cambió el baseline de stock inicial, se reaplica una vez aunque haya
+    // historial (corrección puntual del punto de partida).
+    var baselineNuevo = (state.meta.stockBaseline || 0) < STOCK_BASELINE;
+    var aplicarInicial = baselineNuevo || !protegerInicial;
     var byCode = {};
     state.articulos.forEach(function (a) { if (a.codigo) byCode[a.codigo] = a; });
     fresh.articulos.forEach(function (na) {
@@ -565,8 +572,9 @@
       ex.totalHistorico = na.totalHistorico;
       if (ex.promedioManual === undefined) ex.promedioManual = null;
       if (ex.mesesPedido === undefined) ex.mesesPedido = null;
-      if (!protegerInicial) ex.stockInicial = na.stockInicial;
+      if (aplicarInicial) ex.stockInicial = na.stockInicial;
     });
+    state.meta.stockBaseline = STOCK_BASELINE;
     // Fusionar duplicados (ej. a_580 → a_580E): mover movimientos, sumar stock
     // inicial al canónico y eliminar el duplicado.
     FUSIONAR.forEach(function (par) {
