@@ -135,7 +135,7 @@ svg { display: block; }
 .main { display: flex; flex-direction: column; min-width: 0; }
 .topbar {
   position: sticky; top: 0; z-index: 20;
-  display: flex; align-items: center; gap: 14px;
+  display: flex; align-items: center; gap: 14px; flex-wrap: wrap;
   padding: 18px 30px;
   background: rgba(244,245,251,.85);
   backdrop-filter: blur(10px);
@@ -144,6 +144,17 @@ svg { display: block; }
 .topbar__title h1 { font-size: 21px; }
 .topbar__title p { font-size: 13px; color: var(--muted); margin-top: 2px; }
 .topbar__actions { margin-left: auto; display: flex; gap: 10px; align-items: center; flex-wrap: wrap; justify-content: flex-end; }
+
+/* Toggle Cajas / Unidades (estilo iOS) — solo cambia cómo se muestran las cantidades */
+.unit-toggle { display: flex; align-items: center; }
+.uswitch { display: inline-flex; align-items: center; gap: 9px; padding: 4px; border: 0; background: none; cursor: pointer; font: inherit; }
+.uswitch__lbl { font-size: 12.5px; font-weight: 700; letter-spacing: .2px; color: var(--muted); transition: color .15s; }
+.uswitch__track { position: relative; flex: none; width: 46px; height: 27px; border-radius: 999px; background: #c8ccd6; transition: background .2s; box-shadow: inset 0 1px 2px rgba(0,0,0,.18); }
+.uswitch__knob { position: absolute; top: 3px; left: 3px; width: 21px; height: 21px; border-radius: 50%; background: #fff; box-shadow: 0 2px 5px rgba(0,0,0,.3); transition: transform .2s; }
+.uswitch.is-on .uswitch__track { background: #34c759; }
+.uswitch.is-on .uswitch__knob { transform: translateX(19px); }
+.uswitch.is-on .uswitch__lbl--on { color: #1fa84a; }
+.uswitch:not(.is-on) .uswitch__lbl--off { color: var(--text); }
 
 .view { padding: 26px 30px 60px; }
 
@@ -441,6 +452,7 @@ svg { display: block; }
   .stats { grid-template-columns: 1fr; }
   .topbar__title h1 { font-size: 18px; }
   .topbar__actions .btn span.lbl { display: none; }
+  .uswitch__lbl { font-size: 11.5px; }
 }
 
 /* ---------- Print ---------- */

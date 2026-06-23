@@ -26,6 +26,16 @@ La app está organizada en **5 módulos**:
 
 El **pedido sugerido** es `punto de pedido − stock hoy`, cuando da positivo.
 
+### Cajas / Unidades
+
+Arriba de todo hay un **toggle Cajas ⇄ Unidades** que cambia cómo se *muestran* las
+cantidades en toda la app (el stock se guarda siempre en cajas). La conversión usa las
+**unidades por caja** de cada artículo.
+
+El Excel de entregas puede venir **en unidades o en cajas**, y la app lo **detecta sola**:
+si `Cantidad × Precio = Importe` está en unidades; si no, está en cajas y de ahí saca las
+unidades por caja. En cualquier caso el stock se registra correctamente en cajas.
+
 ## 🖥️ Usarla
 
 ### Online (GitHub Pages)

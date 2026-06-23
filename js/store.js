@@ -10,7 +10,7 @@
   // fusiona (merge) en los navegadores existentes: actualiza nombres, totales y
   // máximos y agrega artículos nuevos, SIN borrar movimientos, pedidos ni el
   // stock real ya cargado (ver mergeSeed).
-  var SEED_VERSION = 8;
+  var SEED_VERSION = 9;
   // Versión del "stock inicial" precargado (columna Existencia). Al subirla, el
   // stock inicial real se reaplica una vez aunque ya haya movimientos (corrección
   // de baseline). Después vuelve a protegerse. Ver mergeSeed.
@@ -32,6 +32,7 @@
         moneda: 'ARS',
         periodoMeses: 17,       // meses que abarca el total de ventas conocidas (base del promedio mensual)
         mesesPedidoDefault: 2,  // meses de cobertura deseados por defecto (punto de pedido = promedio x meses)
+        unidadVista: 'cajas',   // unidad para MOSTRAR cantidades: 'cajas' | 'unidades' (solo display)
         creado: Date.now()
       },
       // Artículo: promedioManual y mesesPedido son overrides opcionales (null = usar el automático/global).
@@ -92,6 +93,34 @@
   function getMeta() { return Object.assign({}, state.meta); }
   function setMeta(patch) { state.meta = Object.assign(state.meta, patch); save(); }
 
+  /* ---------- Unidades de visualización (cajas / unidades) ---------- */
+  // El stock se guarda siempre en CAJAS (canónico). Esto solo cambia cómo se MUESTRA.
+  function getUnidadVista() { return state.meta.unidadVista === 'unidades' ? 'unidades' : 'cajas'; }
+  function setUnidadVista(v) {
+    state.meta.unidadVista = (v === 'unidades') ? 'unidades' : 'cajas';
+    save(); return state.meta.unidadVista;
+  }
+  // Unidades por caja de un artículo (id u objeto). 1 si no se conoce.
+  function uxcDe(idOrArt) {
+    var a = (idOrArt && typeof idOrArt === 'object') ? idOrArt : getArticulo(idOrArt);
+    var u = a && a.uxc;
+    return (u && u > 0) ? u : 1;
+  }
+  // Convierte una cantidad en cajas a la unidad de vista activa (para mostrar).
+  function enVista(cajas, idOrArt) {
+    return getUnidadVista() === 'unidades' ? Math.round((cajas || 0) * uxcDe(idOrArt)) : Math.round(cajas || 0);
+  }
+  // Actualiza las Uni×Caja de varios artículos desde un import en cajas. Devuelve cuántas cambió.
+  function actualizarUxcDesde(map) {
+    var idx = idxCatalogo(), n = 0;
+    Object.keys(map || {}).forEach(function (code) {
+      var a = matchCodigo(code, idx), u = Math.round(map[code]);
+      if (a && u > 0 && a.uxc !== u) { a.uxc = u; n++; }
+    });
+    if (n) save();
+    return n;
+  }
+
   /* ---------- Artículos ---------- */
   function getArticulos(opts) {
     opts = opts || {};
@@ -134,6 +163,7 @@
     if (data.precio !== undefined) a.precio = num(data.precio, 0);
     if (data.stockInicial !== undefined) a.stockInicial = Math.max(0, Math.round(num(data.stockInicial, 0)));
     if (data.totalHistorico !== undefined) a.totalHistorico = Math.max(0, Math.round(num(data.totalHistorico, 0)));
+    if (data.uxc !== undefined) a.uxc = Math.max(1, Math.round(num(data.uxc, 1)));
     if (data.promedioManual !== undefined) a.promedioManual = optNum(data.promedioManual);
     if (data.mesesPedido !== undefined) a.mesesPedido = optNum(data.mesesPedido);
     if (data.activo !== undefined) a.activo = !!data.activo;
@@ -364,10 +394,15 @@
 
   /* ---------- Importación de Entregas Loeke (Módulo 4) ----------
      Recibe las filas (array 2D) de un Excel de detalle de facturación (Loeke a
-     OSA). Detecta automáticamente la columna de "Cód. Artículo" (la que más
-     coincide con el catálogo); Cantidad va 3 columnas a la derecha (código,
-     descripción, bonificación, cantidad) y la Fecha en la primera columna.
-     Cada fila es una entrega que SUMA al stock. */
+     OSA). Detecta la columna de "Cód. Artículo" (la que más cruza con el
+     catálogo); a su derecha van Cantidad (I), Precio (J) y Total (K).
+
+     El reporte puede venir en UNIDADES o en CAJAS. Detección por fila:
+       - en unidades: I × J = K  (cantidad × precio unitario = importe)
+       - en cajas:    I × J ≠ K, y K ÷ (I×J) = unidades por caja (uxc)
+     El stock se guarda siempre en CAJAS (canónico):
+       - archivo en cajas    -> la cantidad ya está en cajas; además se actualiza la uxc
+       - archivo en unidades -> cajas = unidades ÷ uxc (uxc del catálogo) */
   function parseEntregas(rows) {
     rows = rows || [];
     var idx = idxCatalogo();
@@ -383,28 +418,56 @@
       });
       if (cnt > best) { best = cnt; codCol = c; }
     }
-    var cantCol = codCol + 3;
-    var filas = [], totalCantidad = 0, fechas = {}, noEncontrados = [], matchCount = 0;
+    var cantCol = codCol + 3, precCol = codCol + 4, totCol = codCol + 5;
+    function esFila(r) { return r && /^\d{2,4}[A-Za-z]?$/.test(String(r[codCol] != null ? r[codCol] : '').trim()); }
+
+    // Detección de formato: ¿I×J coincide con K en la mayoría de las filas?
+    var ratios = [];
     rows.forEach(function (r) {
-      if (!r) return;
-      var codRaw = (r[codCol] != null) ? String(r[codCol]).trim() : '';
-      if (!/^\d{2,4}[A-Za-z]?$/.test(codRaw)) return;       // no es fila de datos
-      var cant = Math.round(num(r[cantCol], 0));
-      if (cant <= 0) return;
+      if (!esFila(r)) return;
+      var I = num(r[cantCol]), J = num(r[precCol]), K = num(r[totCol]);
+      if (I > 0 && J > 0 && K > 0) ratios.push(K / (I * J));
+    });
+    var enUni = ratios.filter(function (x) { return Math.abs(x - 1) < 0.02; }).length;
+    var formato = (ratios.length && enUni >= ratios.length / 2) ? 'unidades' : 'cajas';
+
+    var filas = [], totalCajas = 0, totalUnidades = 0, fechas = {}, noEncontrados = [], matchCount = 0, uxcDerivado = {};
+    rows.forEach(function (r) {
+      if (!esFila(r)) return;
+      var codRaw = String(r[codCol]).trim();
+      var cantOrig = Math.round(num(r[cantCol], 0));
+      if (cantOrig <= 0) return;
+      var I = num(r[cantCol]), J = num(r[precCol]), K = num(r[totCol]);
+      var uxcFila = (I > 0 && J > 0 && K > 0) ? Math.round(K / (I * J)) : null;
       var fecha = celdaAFecha(r[0]);
       var art = matchCodigo(codRaw, idx);
       if (art) matchCount++; else noEncontrados.push(codRaw);
+      if (formato === 'cajas' && uxcFila && uxcFila > 1) uxcDerivado[codRaw] = uxcFila;
+
+      var uxcArt = art ? uxcDe(art) : 1;
+      var cantidadCajas, unidades;
+      if (formato === 'cajas') {                 // ya viene en cajas
+        cantidadCajas = cantOrig;
+        unidades = cantOrig * (uxcFila || uxcArt);
+      } else {                                   // viene en unidades -> a cajas
+        var u = uxcFila && uxcFila > 1 ? uxcFila : uxcArt; // normalmente uxc del catálogo
+        cantidadCajas = u > 1 ? Math.round(cantOrig / u) : cantOrig;
+        unidades = cantOrig;
+      }
       if (fecha) fechas[fecha] = true;
-      totalCantidad += cant;
+      totalCajas += cantidadCajas;
+      totalUnidades += unidades;
       filas.push({
-        codigo: codRaw, cantidad: cant, fecha: fecha,
+        codigo: codRaw, cantidadCajas: cantidadCajas, unidades: unidades,
+        cantidadOriginal: cantOrig, uxc: (uxcFila || uxcArt), fecha: fecha,
         descripcion: (r[codCol + 1] != null ? String(r[codCol + 1]).trim() : ''),
         articuloId: art ? art.id : null, nombre: art ? art.nombre : null
       });
     });
     return {
-      filas: filas, totalCantidad: totalCantidad, fechas: Object.keys(fechas).sort(),
-      noEncontrados: noEncontrados, matchCount: matchCount
+      formato: formato, filas: filas, totalCajas: totalCajas, totalUnidades: totalUnidades,
+      fechas: Object.keys(fechas).sort(), noEncontrados: noEncontrados,
+      matchCount: matchCount, uxcDerivado: uxcDerivado
     };
   }
 
@@ -592,6 +655,25 @@
     '948E': 10, '517': 12, '946': 120
   };
 
+  // Unidades por caja (Uni×Caja) por código, derivadas del informe en cajas
+  // (K ÷ (I×J)). Sirven para convertir entre cajas y unidades en la vista y para
+  // normalizar imports en unidades. Se mantienen al vuelo con cada import en cajas.
+  var UXC_SEED = {
+    '031': 24, '246': 6, '280': 12, '315': 12, '355': 24, '395': 12, '396': 12,
+    '501': 6, '502': 12, '504': 6, '505': 12, '506': 12, '507': 12, '508': 6,
+    '509': 12, '510': 12, '513': 12, '515': 12, '518': 12, '519': 12, '520': 12,
+    '521': 12, '523': 12, '525E': 24, '529E': 12, '530': 12, '531': 12, '542': 12,
+    '543': 12, '544': 12, '546': 12, '548': 24, '551': 12, '559': 12, '562': 12,
+    '564': 12, '566E': 6, '575': 12, '577': 12, '579': 12, '580E': 12, '583E': 15,
+    '931E': 12, '932E': 12, '933E': 12, '934E': 12, '935E': 12, '936E': 12,
+    '937E': 12, '941E': 12, '942E': 12, '945E': 12, '946E': 12, '948E': 12
+  };
+  // uxc del catálogo: exacto, +E y -E (catálogo 946 <-> informe 946E). 1 si no se conoce.
+  function uxcSeed(code) {
+    code = String(code).toUpperCase();
+    return UXC_SEED[code] || UXC_SEED[code + 'E'] || UXC_SEED[code.replace(/E$/, '')] || 1;
+  }
+
   // Construye el estado inicial con el catálogo real precargado.
   function seedReal() {
     var st = blank();
@@ -609,6 +691,7 @@
         foto: placeholder(nombre), precio: 0,
         stockInicial: STOCK_INICIAL[codigo] || 0, // stock real del cliente (Diferencia, informe 23/06/26)
         totalHistorico: total,        // ventas conocidas en periodoMeses (base del promedio mensual)
+        uxc: uxcSeed(codigo),         // unidades por caja (para vista en unidades / normalizar imports)
         promedioManual: null,         // sin override: usa el promedio automático
         mesesPedido: null,            // sin override: usa meta.mesesPedidoDefault
         activo: true
@@ -643,6 +726,7 @@
       if (!ex) { state.articulos.push(na); return; } // artículo nuevo del catálogo
       ex.nombre = na.nombre;
       ex.totalHistorico = na.totalHistorico;
+      if (!ex.uxc) ex.uxc = na.uxc; // seed de Uni×Caja si todavía no la tiene (no pisa la de un import)
       if (ex.promedioManual === undefined) ex.promedioManual = null;
       if (ex.mesesPedido === undefined) ex.mesesPedido = null;
       if (aplicarInicial) ex.stockInicial = na.stockInicial;
@@ -714,6 +798,8 @@
   /* ---------- API pública ---------- */
   window.Store = {
     getMeta: getMeta, setMeta: setMeta,
+    getUnidadVista: getUnidadVista, setUnidadVista: setUnidadVista,
+    uxcDe: uxcDe, enVista: enVista, actualizarUxcDesde: actualizarUxcDesde,
     getArticulos: getArticulos, getArticulo: getArticulo,
     addArticulo: addArticulo, updateArticulo: updateArticulo, removeArticulo: removeArticulo,
     addMovimiento: addMovimiento, addMovimientosBatch: addMovimientosBatch,
