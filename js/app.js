@@ -155,6 +155,7 @@
   function iconLayers() { return '<svg viewBox="0 0 24 24"><path d="M12 2 2 7l10 5 10-5-10-5zm0 9L4.2 7 12 4.3 19.8 7 12 11zM2 12l10 5 10-5 2 1-12 6L0 13l2-1z"/></svg>'; }
   function iconBell() { return '<svg viewBox="0 0 24 24"><path d="M12 22a2.5 2.5 0 0 0 2.45-2h-4.9A2.5 2.5 0 0 0 12 22zm6-6V11a6 6 0 0 0-5-5.9V4a1 1 0 1 0-2 0v1.1A6 6 0 0 0 6 11v5l-2 2v1h16v-1l-2-2z"/></svg>'; }
   function iconCart() { return '<svg viewBox="0 0 24 24"><path d="M7 18a2 2 0 1 0 0 4 2 2 0 0 0 0-4zm10 0a2 2 0 1 0 0 4 2 2 0 0 0 0-4zM6.2 4l.9 2H20a1 1 0 0 1 1 1.3l-2.4 8.3A2 2 0 0 1 16.6 17H8.5a2 2 0 0 1-1.9-1.5L4.3 6.5 3.6 4z"/></svg>'; }
+  function iconUpload() { return '<svg viewBox="0 0 24 24"><path d="M12 4l5 5-1.4 1.4L13 7.8V16h-2V7.8L8.4 10.4 7 9l5-5zM5 18h14v2H5z"/></svg>'; }
 
   function badgeEstado(e) {
     if (e === 'sin') return '<span class="badge badge--danger"><span class="dot"></span>Sin stock</span>';
@@ -460,11 +461,12 @@
     var explica = esVenta
       ? 'Cargá las cajas que OSA <strong>vendió</strong> a sus clientes. Salen del stock.'
       : 'Cargá las cajas que <strong>Loeke entregó</strong> a OSA. Entran al stock.';
-    var fmtFut = esVenta ? 'Importación desde <strong>PDF</strong> (ventas totales por artículo): próximamente.' : 'Importación desde <strong>Excel</strong>: próximamente.';
+    var fmtFut = esVenta ? 'Importá el informe completo (PDF o texto) con el botón de abajo, o cargá a mano en la tabla.' : 'Importación desde <strong>Excel</strong>: próximamente.';
 
     var html = '<div class="callout"><svg viewBox="0 0 24 24"><path d="M12 2a10 10 0 1 0 0 20 10 10 0 0 0 0-20zm1 15h-2v-6h2v6zm0-8h-2V7h2v2z"/></svg><div>' + explica + ' <span class="muted">' + fmtFut + '</span></div></div>';
+    if (esVenta) html += '<div class="row" style="margin-top:14px;">' + btn('importar-ventas', 'primary', iconUpload(), 'Importar informe (PDF / texto)') + '</div>';
     html += '<div class="card" style="margin-top:18px;">';
-    html += '<div class="card__head"><h2>' + titulo + '</h2><div class="spacer"></div>' +
+    html += '<div class="card__head"><h2>' + titulo + (esVenta ? ' · carga manual' : '') + '</h2><div class="spacer"></div>' +
       '<label class="label" style="margin:0;display:flex;align-items:center;gap:8px;">Fecha' +
       '<input class="input" id="cargaFecha" type="date" value="' + S.hoyISO() + '" style="width:auto;padding:8px 10px;"></label></div>';
     html += '<div class="search" style="margin:0 18px 4px;flex:none;"><svg viewBox="0 0 24 24"><path d="M21 20l-5.6-5.6a7 7 0 1 0-1.4 1.4L20 21zM4 10a5 5 0 1 1 10 0 5 5 0 0 1-10 0z"/></svg>' +
@@ -539,6 +541,127 @@
       toast('Entregas registradas: ' + n + ' artículo(s)', 'ok');
       render();
     }
+  }
+
+  /* ---------- Importar Ventas OSA (PDF con texto / texto pegado) ---------- */
+  function cargarScript(src) {
+    return new Promise(function (res, rej) {
+      var s = document.createElement('script');
+      s.src = src; s.onload = function () { res(); };
+      s.onerror = function () { rej(new Error('No se pudo cargar ' + src)); };
+      document.head.appendChild(s);
+    });
+  }
+  // Extrae el texto de un PDF usando pdf.js (se carga bajo demanda desde CDN).
+  function pdfATexto(file) {
+    var PDFJS = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/';
+    return (window.pdfjsLib ? Promise.resolve() :
+      cargarScript(PDFJS + 'pdf.min.js').then(function () {
+        window.pdfjsLib.GlobalWorkerOptions.workerSrc = PDFJS + 'pdf.worker.min.js';
+      })
+    ).then(function () { return file.arrayBuffer(); })
+      .then(function (buf) { return window.pdfjsLib.getDocument({ data: buf }).promise; })
+      .then(function (pdf) {
+        var pages = [];
+        for (var i = 1; i <= pdf.numPages; i++) pages.push(i);
+        return pages.reduce(function (acc, n) {
+          return acc.then(function (txt) {
+            return pdf.getPage(n).then(function (p) { return p.getTextContent(); }).then(function (tc) {
+              var rows = {};
+              tc.items.forEach(function (it) {
+                var y = Math.round(it.transform[5]);
+                (rows[y] = rows[y] || []).push(it);
+              });
+              var lns = Object.keys(rows).sort(function (a, b) { return b - a; }).map(function (y) {
+                return rows[y].sort(function (a, b) { return a.transform[4] - b.transform[4]; })
+                  .map(function (it) { return it.str; }).join(' ');
+              });
+              return txt + lns.join('\n') + '\n';
+            });
+          });
+        }, Promise.resolve(''));
+      });
+  }
+  function openImportVentas() {
+    var body = '<div class="form">' +
+      '<div class="imgdrop" id="impDrop" style="cursor:pointer;">' +
+      '<div class="imgdrop__text"><strong>Subir PDF del informe</strong><span id="impFileName">PDF con texto seleccionable (no foto escaneada).</span></div>' +
+      '<input type="file" id="impFile" accept="application/pdf" hidden>' +
+      '</div>' +
+      field('O pegá el texto del informe', '<textarea class="textarea" id="impText" style="min-height:120px;font-family:monospace;font-size:12px;" placeholder="Desde 5/06/26 hasta 30/06/26&#10;:L031  FILTRO P/CAFE  12&#10;..."></textarea>', true) +
+      '<div class="hint">Se cruza con tu catálogo por código (L031 = 031, L529 = 529E…). Vas a poder revisarlo antes de confirmar.</div>' +
+      '<div class="form-actions"><button type="button" class="btn btn--ghost" data-close>Cancelar</button>' +
+      '<button type="button" class="btn btn--primary" id="impAnalizar">Analizar</button></div>' +
+      '</div>';
+    openModal('Importar ventas OSA', body);
+    $('#impDrop').addEventListener('click', function () { $('#impFile').click(); });
+    $('#impFile').addEventListener('change', function (e) {
+      var f = e.target.files[0]; $('#impFileName').textContent = f ? f.name : '';
+    });
+    $('#impAnalizar').addEventListener('click', function () {
+      var f = $('#impFile').files[0];
+      var pegado = $('#impText').value;
+      if (f && /pdf/i.test((f.type || '') + ' ' + f.name)) {
+        toast('Leyendo PDF…', 'info');
+        pdfATexto(f).then(function (txt) { previewImport(txt); })
+          .catch(function () { toast('No se pudo leer el PDF. Pegá el texto del informe.', 'danger'); });
+      } else if (pegado.trim()) {
+        previewImport(pegado);
+      } else if (f) {
+        toast('Por ahora subí un PDF con texto, o pegá el texto. Las fotos necesitan OCR.', 'warn');
+      } else {
+        toast('Subí el PDF o pegá el texto', 'warn');
+      }
+    });
+  }
+  function previewImport(text) {
+    var r = S.parseReporteVentas(text);
+    if (!r.filas.length) { toast('No reconocí filas en el informe. Revisá el texto.', 'danger'); return; }
+    var fecha = r.periodo.hasta || S.hoyISO();
+    var notaPeriodo = r.periodo.desde ? (fmtFecha(r.periodo.desde) + ' a ' + fmtFecha(r.periodo.hasta)) : fmtFecha(fecha);
+    var nota = 'Ventas OSA ' + notaPeriodo;
+    var yaImportado = S.getMovimientos().filter(function (m) { return m.nota === nota; }).length;
+    var coincide = r.totalInforme != null && r.totalInforme === r.totalParseado;
+
+    var rows = r.filas.map(function (f) {
+      var ok = !!f.articuloId;
+      return '<tr style="' + (ok ? '' : 'opacity:.55;') + '">' +
+        '<td>' + esc(f.codigoReporte) + '</td>' +
+        '<td>' + (ok ? esc(f.nombre) : '<span class="muted">' + esc(f.desc || '—') + ' · no está en el catálogo</span>') + '</td>' +
+        '<td class="num"><strong>' + fmtInt(f.ventas) + '</strong></td></tr>';
+    }).join('');
+
+    var resumen = '<div class="callout" style="margin-bottom:14px;"><svg viewBox="0 0 24 24"><path d="M12 2a10 10 0 1 0 0 20 10 10 0 0 0 0-20zm1 15h-2v-6h2v6zm0-8h-2V7h2v2z"/></svg><div>' +
+      'Período <strong>' + esc(notaPeriodo) + '</strong> · ' + r.matchCount + ' de ' + r.filas.length + ' reconocidos' +
+      (r.noEncontrados.length ? ' · <span style="color:var(--warn)">' + r.noEncontrados.length + ' sin coincidencia</span>' : '') +
+      '<br>Total del informe: <strong>' + (r.totalInforme != null ? fmtInt(r.totalInforme) : '—') + '</strong> · ' +
+      'Suma leída: <strong style="color:' + (coincide ? 'var(--ok)' : 'var(--warn)') + '">' + fmtInt(r.totalParseado) + '</strong>' +
+      (r.totalInforme != null && !coincide ? ' — no coinciden, revisá' : '') +
+      (yaImportado ? '<br><strong style="color:var(--warn)">⚠ Ya importaste este período (' + yaImportado + ' movimientos). Si confirmás, se suman de nuevo.</strong>' : '') +
+      '</div></div>';
+
+    var body = resumen +
+      '<div class="row" style="gap:12px;align-items:center;margin-bottom:10px;">' +
+      '<label class="label" style="margin:0;display:flex;align-items:center;gap:8px;">Fecha de los movimientos' +
+      '<input class="input" id="impFecha" type="date" value="' + esc(fecha) + '" style="width:auto;"></label></div>' +
+      '<div class="table-wrap" style="max-height:320px;overflow:auto;"><table class="table"><thead><tr><th>Código</th><th>Artículo</th><th class="num">Ventas</th></tr></thead><tbody>' + rows + '</tbody></table></div>' +
+      '<div class="form-actions"><button type="button" class="btn btn--ghost" data-close>Cancelar</button>' +
+      '<button type="button" class="btn btn--primary" id="impConfirm">Confirmar importación</button></div>';
+    openModal('Revisar ventas a importar', body);
+
+    $('#impConfirm').addEventListener('click', function () {
+      var fech = $('#impFecha').value || fecha;
+      var batch = r.filas.filter(function (f) { return f.articuloId && f.ventas > 0; })
+        .map(function (f) { return { articuloId: f.articuloId, tipo: 'venta', cantidad: f.ventas, fecha: fech, nota: nota }; });
+      if (!batch.length) { toast('No hay ventas para importar', 'warn'); return; }
+      S.addMovimientosBatch(batch);
+      closeModal();
+      var cajas = batch.reduce(function (a, b) { return a + b.cantidad; }, 0);
+      toast('Importadas ' + batch.length + ' ventas (' + fmtInt(cajas) + ' cajas)', 'ok');
+      var pend = S.pedidoSugerido().length;
+      render();
+      if (pend) setTimeout(function () { toast(pend + ' artículo(s) necesitan reposición', 'warn'); }, 700);
+    });
   }
 
   function openAjuste() {
@@ -814,6 +937,7 @@
     else if (act === 'guardar-ventas') guardarCarga(true);
     else if (act === 'guardar-entregas') guardarCarga(false);
     else if (act === 'nuevo-ajuste') openAjuste();
+    else if (act === 'importar-ventas') openImportVentas();
     else if (act === 'demo') cargarDemo();
   });
 

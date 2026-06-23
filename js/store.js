@@ -10,7 +10,11 @@
   // fusiona (merge) en los navegadores existentes: actualiza nombres, totales y
   // máximos y agrega artículos nuevos, SIN borrar movimientos, pedidos ni el
   // stock real ya cargado (ver mergeSeed).
-  var SEED_VERSION = 5;
+  var SEED_VERSION = 6;
+  // Artículos duplicados (mismo producto con código base y +E) que deben quedar
+  // como uno solo: [idDuplicado, idCanónico]. Al fusionar se mueven los
+  // movimientos y se suma el stock inicial al canónico. Ver mergeSeed.
+  var FUSIONAR = [['a_580', 'a_580E']];
   // Handler opcional que registra la capa de UI para avisar si falla un guardado
   // (p. ej. localStorage lleno). Ver setSaveErrorHandler.
   var onSaveError = null;
@@ -278,6 +282,59 @@
     return out;
   }
 
+  /* ---------- Importación de Ventas OSA (Módulo 5) ----------
+     Parser del informe "Ventas por artículo" (texto extraído de un PDF). Formato:
+       Desde 5/06/26 hasta 30/06/26
+       :L031   FILTRO P/CAFE LOEKEMEYER        12
+       ...
+                                               695     (total al pie)
+     Los códigos del informe son "L" + código. El informe suele quitar la "E"
+     final (L529 = 529E). Cruce: exacto y, si no, agregando "E". */
+  function ddmmaaISO(s) {
+    var p = (s || '').split('/');
+    if (p.length !== 3) return null;
+    var d = parseInt(p[0], 10), mo = parseInt(p[1], 10), y = parseInt(p[2], 10);
+    if (isNaN(d) || isNaN(mo) || isNaN(y)) return null;
+    if (y < 100) y += 2000;
+    return y + '-' + pad(mo) + '-' + pad(d);
+  }
+  function parseReporteVentas(text) {
+    text = String(text || '');
+    var lines = text.split(/\r?\n/);
+    var idx = {};
+    state.articulos.forEach(function (a) { if (a.codigo) idx[String(a.codigo).toUpperCase()] = a; });
+
+    var periodo = { desde: null, hasta: null };
+    var mp = text.match(/Desde\s+(\d{1,2}\/\d{1,2}\/\d{2,4})\s+hasta\s+(\d{1,2}\/\d{1,2}\/\d{2,4})/i);
+    if (mp) { periodo.desde = ddmmaaISO(mp[1]); periodo.hasta = ddmmaaISO(mp[2]); }
+
+    var filas = [], totalParseado = 0, totalInforme = null, noEncontrados = [], matchCount = 0;
+    lines.forEach(function (ln) {
+      var line = ln.trim();
+      if (!line) return;
+      var ft = line.match(/^(\d{1,7})$/);     // total al pie: línea con solo un número
+      if (ft) { totalInforme = parseInt(ft[1], 10); return; }
+      var m = line.match(/^:?\s*L\s*([0-9A-Za-z]+)\b(.*)$/); // fila: (:)L + código + ...
+      if (!m) return;
+      var codigoReporte = m[1].toUpperCase();
+      var rest = (m[2] || '').trim();
+      var vm = rest.match(/(\d+)\s*$/);        // las ventas son el número al final
+      var ventas = vm ? parseInt(vm[1], 10) : 0;
+      var desc = vm ? rest.slice(0, vm.index).trim() : rest;
+      var art = idx[codigoReporte] || idx[codigoReporte + 'E'] || null;
+      if (art) matchCount++; else noEncontrados.push(codigoReporte);
+      totalParseado += ventas;
+      filas.push({
+        codigoReporte: codigoReporte, desc: desc, ventas: ventas,
+        articuloId: art ? art.id : null, codigo: art ? art.codigo : null, nombre: art ? art.nombre : null
+      });
+    });
+    return {
+      periodo: periodo, filas: filas, totalParseado: totalParseado,
+      totalInforme: totalInforme, noEncontrados: noEncontrados, matchCount: matchCount
+    };
+  }
+
   /* ---------- Pedidos ---------- */
   function crearPedido(items, nota) {
     var clean = items
@@ -385,8 +442,7 @@
     ['564', 'Corta pizza 8cm mango madera', 78],
     ['525E', 'Sacacorcho cabo de madera', 75],
     ['542', 'Ahueca papas', 69],
-    ['580E', 'Batidor mini', 68],
-    ['580', 'Batidor mini', 63],
+    ['580E', 'Batidor mini', 131], // 580 y 580E son el mismo artículo: se fusionan (68 + 63)
     ['280', 'Manga repostera + 4 boquillas', 60],
     ['525', 'Sacacorcho cabo madera', 55],
     ['811E', 'Corta pizza mango ergonómico Ø9cm', 50],
@@ -511,6 +567,15 @@
       if (ex.mesesPedido === undefined) ex.mesesPedido = null;
       if (!protegerInicial) ex.stockInicial = na.stockInicial;
     });
+    // Fusionar duplicados (ej. a_580 → a_580E): mover movimientos, sumar stock
+    // inicial al canónico y eliminar el duplicado.
+    FUSIONAR.forEach(function (par) {
+      var from = getArticulo(par[0]), to = getArticulo(par[1]);
+      if (!from || !to) return;
+      state.movimientos.forEach(function (m) { if (m.articuloId === from.id) m.articuloId = to.id; });
+      to.stockInicial = (to.stockInicial || 0) + (from.stockInicial || 0);
+      state.articulos = state.articulos.filter(function (a) { return a.id !== from.id; });
+    });
     if (state.meta.mesesPedidoDefault === undefined) state.meta.mesesPedidoDefault = 2;
     state.meta.seedVersion = SEED_VERSION;
     save();
@@ -573,7 +638,7 @@
     addMovimiento: addMovimiento, addMovimientosBatch: addMovimientosBatch,
     getMovimientos: getMovimientos, removeMovimiento: removeMovimiento,
     computeStocks: computeStocks, stockActual: stockActual, totales: totales,
-    movimientosConSaldo: movimientosConSaldo,
+    movimientosConSaldo: movimientosConSaldo, parseReporteVentas: parseReporteVentas,
     estado: estado, sugerido: sugerido, necesitaPedido: necesitaPedido, pedidoSugerido: pedidoSugerido,
     promedioMensual: promedioMensual, promedioMensualAuto: promedioMensualAuto,
     mesesPedido: mesesPedido, puntoPedido: puntoPedido,

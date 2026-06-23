@@ -20,8 +20,9 @@ La app está organizada en **5 módulos**:
    (o lo sobrescribís) y los meses son globales (o por artículo).
 4. **Entregas Loeke** — lo que Loeke entrega a OSA (entra al stock). Carga manual;
    *importación por Excel próximamente*.
-5. **Ventas OSA** — lo que OSA vende a sus clientes (sale del stock). Carga manual;
-   *importación por PDF próximamente*.
+5. **Ventas OSA** — lo que OSA vende a sus clientes (sale del stock). Se carga
+   **importando el informe** (PDF con texto, o pegando el texto) con revisión previa,
+   o a mano. Cruza por código (`L031` = `031`, `L529` = `529E`).
 
 El **pedido sugerido** es `punto de pedido − stock hoy`, cuando da positivo.
 
