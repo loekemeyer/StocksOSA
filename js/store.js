@@ -10,7 +10,7 @@
   // fusiona (merge) en los navegadores existentes: actualiza nombres, totales y
   // máximos y agrega artículos nuevos, SIN borrar movimientos, pedidos ni el
   // stock real ya cargado (ver mergeSeed).
-  var SEED_VERSION = 10;
+  var SEED_VERSION = 11;
   // Versión del "stock inicial" precargado (columna Existencia). Al subirla, el
   // stock inicial real se reaplica una vez aunque ya haya movimientos (corrección
   // de baseline). Después vuelve a protegerse. Ver mergeSeed.
@@ -19,6 +19,8 @@
   // como uno solo: [idDuplicado, idCanónico]. Al fusionar se mueven los
   // movimientos y se suma el stock inicial al canónico. Ver mergeSeed.
   var FUSIONAR = [['a_580', 'a_580E'], ['a_525', 'a_525E']];
+  // Artículos discontinuados: se quitan del catálogo y de los datos del usuario.
+  var DISCONTINUADOS = ['388E'];
   // Handler opcional que registra la capa de UI para avisar si falla un guardado
   // (p. ej. localStorage lleno). Ver setSaveErrorHandler.
   var onSaveError = null;
@@ -632,7 +634,6 @@
     ['560', 'Pinza corta alambre 21cm', 106],
     ['589E', 'Pelador mango acrílico', 100],
     ['598E', 'Pelador negro dentado', 100],
-    ['388E', 'Máquina corta papa', 96],
     ['246', 'Prensa matambre', 81],
     ['511', 'Abrelatas uña 3 en 1', 80],
     ['564', 'Corta pizza 8cm mango madera', 78],
@@ -726,7 +727,14 @@
     '543': 12, '544': 12, '546': 12, '548': 24, '551': 12, '559': 12, '562': 12,
     '564': 12, '566E': 6, '575': 12, '577': 12, '579': 12, '580E': 12, '583E': 15,
     '931E': 12, '932E': 12, '933E': 12, '934E': 12, '935E': 12, '936E': 12,
-    '937E': 12, '941E': 12, '942E': 12, '945E': 12, '946E': 12, '948E': 12
+    '937E': 12, '941E': 12, '942E': 12, '945E': 12, '946E': 12, '948E': 12,
+    // Completadas a 12 u/caja (estándar del cliente) las que no tenían Uni×Caja.
+    '512': 12, '587': 12, '057': 12, '560': 12, '589E': 12, '598E': 12, '511': 12,
+    '811E': 12, '538E': 12, '361E': 12, '478E': 12, '570': 12, '561': 12, '596': 12,
+    '229': 12, '581': 12, '540E': 12, '539E': 12, '536E': 12, '222': 12, '595': 12,
+    '325': 12, '522E': 12, '943E': 12, '574E': 12, '585E': 12, '809E': 12, '569': 12,
+    '554': 12, '563': 12, '586': 12, '591': 12, '944E': 12, '817E': 12, '364E': 12,
+    '328E': 12, '360E': 12, '594': 12, '524': 12, '517': 12
   };
   // uxc del catálogo: exacto, +E y -E (catálogo 946 <-> informe 946E). 1 si no se conoce.
   function uxcSeed(code) {
@@ -787,7 +795,9 @@
       if (!ex) { state.articulos.push(na); return; } // artículo nuevo del catálogo
       ex.nombre = na.nombre;
       ex.totalHistorico = na.totalHistorico;
-      if (!ex.uxc) ex.uxc = na.uxc; // seed de Uni×Caja si todavía no la tiene (no pisa la de un import)
+      // Uni×Caja: setear si falta, o mejorar el default "desconocido" (1) cuando el
+      // seed ya la conoce. No pisa una Uni×Caja real ya cargada por un import (>1).
+      if (!ex.uxc || (ex.uxc === 1 && na.uxc > 1)) ex.uxc = na.uxc;
       if (ex.promedioManual === undefined) ex.promedioManual = null;
       if (ex.mesesPedido === undefined) ex.mesesPedido = null;
       if (aplicarInicial) ex.stockInicial = na.stockInicial;
@@ -801,6 +811,19 @@
       state.movimientos.forEach(function (m) { if (m.articuloId === from.id) m.articuloId = to.id; });
       to.stockInicial = (to.stockInicial || 0) + (from.stockInicial || 0);
       state.articulos = state.articulos.filter(function (a) { return a.id !== from.id; });
+    });
+    // Artículos discontinuados: quitar el artículo y limpiar sus movimientos y
+    // los renglones de pedidos que lo referencian.
+    DISCONTINUADOS.forEach(function (code) {
+      var ids = state.articulos.filter(function (a) { return a.codigo === code; })
+        .map(function (a) { return a.id; });
+      if (!ids.length) return;
+      var borrado = function (ref) { return ids.indexOf(ref) >= 0; };
+      state.movimientos = state.movimientos.filter(function (m) { return !borrado(m.articuloId); });
+      state.pedidos.forEach(function (p) {
+        if (p.items) p.items = p.items.filter(function (it) { return !borrado(it.articuloId); });
+      });
+      state.articulos = state.articulos.filter(function (a) { return a.codigo !== code; });
     });
     if (state.meta.mesesPedidoDefault === undefined) state.meta.mesesPedidoDefault = 2;
     state.meta.seedVersion = SEED_VERSION;
