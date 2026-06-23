@@ -19,6 +19,9 @@
   // como uno solo: [idDuplicado, idCanónico]. Al fusionar se mueven los
   // movimientos y se suma el stock inicial al canónico. Ver mergeSeed.
   var FUSIONAR = [['a_580', 'a_580E'], ['a_525', 'a_525E'], ['a_478E', 'a_529E']];
+  // Artículos discontinuos: tienen stock para vender pero ya no se fabrican,
+  // así que no figuran en loekemeyer.com y no se reponen (pedido sugerido = 0).
+  var DESCONTINUADOS = ['388E', '517', '524', '554', '563', '364E'];
   // Handler opcional que registra la capa de UI para avisar si falla un guardado
   // (p. ej. localStorage lleno). Ver setSaveErrorHandler.
   var onSaveError = null;
@@ -158,6 +161,7 @@
       totalHistorico: Math.max(0, Math.round(num(data.totalHistorico, 0))),
       promedioManual: optNum(data.promedioManual), // override del promedio mensual (null = automático)
       mesesPedido: optNum(data.mesesPedido),        // override de meses de cobertura (null = global)
+      descontinuado: !!data.descontinuado,          // ya no se fabrica: se vende el stock pero no se repone
       activo: data.activo !== false
     };
     state.articulos.push(a);
@@ -180,6 +184,7 @@
     }
     if (data.promedioManual !== undefined) a.promedioManual = optNum(data.promedioManual);
     if (data.mesesPedido !== undefined) a.mesesPedido = optNum(data.mesesPedido);
+    if (data.descontinuado !== undefined) a.descontinuado = !!data.descontinuado;
     if (data.activo !== undefined) a.activo = !!data.activo;
     save();
     return a;
@@ -282,6 +287,7 @@
     return (a.mesesPedido != null) ? a.mesesPedido : (state.meta.mesesPedidoDefault || 0);
   }
   function puntoPedido(a) {
+    if (a && a.descontinuado) return 0; // discontinuado: no se repone (no genera pedido)
     return Math.round(promedioMensual(a) * mesesPedido(a));
   }
   function sugerido(a, stock) {
@@ -740,7 +746,7 @@
     '511': 12, '512': 12, '522E': 12, '536E': 12, '538E': 12, '539E': 12,
     '540E': 12, '560': 12, '561': 12, '569': 12, '570': 24, '581': 12, '585E': 12,
     '586': 12, '587': 12, '589E': 24, '591': 12, '594': 12, '595': 12, '596': 12,
-    '598E': 12, '809E': 12, '811E': 12, '817E': 12, '943E': 12, '944E': 12
+    '574E': 12, '598E': 12, '809E': 12, '811E': 12, '817E': 12, '943E': 12, '944E': 12
   };
   // uxc del catálogo: exacto, +E y -E (catálogo 946 <-> informe 946E). 0 si no se
   // conoce: el artículo queda sin Uni×Caja real y uxcDe aplica el mínimo (UXC_MIN).
@@ -769,6 +775,7 @@
         uxc: uxcSeed(codigo),         // unidades por caja (para mostrar en cajas / normalizar imports)
         promedioManual: null,         // sin override: usa el promedio automático
         mesesPedido: null,            // sin override: usa meta.mesesPedidoDefault
+        descontinuado: DESCONTINUADOS.indexOf(codigo) >= 0, // no se repone
         activo: true
       });
     });
@@ -801,7 +808,10 @@
       if (!ex) { state.articulos.push(na); return; } // artículo nuevo del catálogo
       ex.nombre = na.nombre;
       ex.totalHistorico = na.totalHistorico;
-      if (!ex.uxc) ex.uxc = na.uxc; // seed de Uni×Caja si todavía no la tiene (no pisa la de un import)
+      // Seed de Uni×Caja: la toma si no la tiene o si arrastra el viejo default 1
+      // (la versión anterior guardaba 1 para los desconocidos). No pisa la de un import (>1).
+      if (!ex.uxc || ex.uxc === 1) ex.uxc = na.uxc;
+      if (na.descontinuado) ex.descontinuado = true; // marca de catálogo: no se repone
       if (ex.promedioManual === undefined) ex.promedioManual = null;
       if (ex.mesesPedido === undefined) ex.mesesPedido = null;
       if (aplicarInicial) ex.stockInicial = na.stockInicial;

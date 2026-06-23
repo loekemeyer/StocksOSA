@@ -192,6 +192,10 @@
     if (e === 'bajo') return '<span class="badge badge--warn"><span class="dot"></span>Para reponer</span>';
     return '<span class="badge badge--ok"><span class="dot"></span>En nivel</span>';
   }
+  // Etiqueta para artículos discontinuos (se vende el stock, no se repone)
+  function tagDescontinuado(a) {
+    return a && a.descontinuado ? ' <span class="badge badge--muted">Discontinuo</span>' : '';
+  }
 
   function emptyApp() {
     return '<div class="card"><div class="card__body"><div class="empty">' +
@@ -252,9 +256,9 @@
       var clase = sg > 0 ? 'reponer' : 'ok';
       html += '<tr data-art="' + a.id + '" data-clase="' + clase + '" ' +
         'data-search="' + esc((a.nombre + ' ' + (a.codigo || '')).toLowerCase()) + '" style="cursor:pointer;">' +
-        '<td><div class="cell-art"><img src="' + fotoDe(a) + '" alt=""><div><div class="nm">' + esc(a.nombre) + '</div><div class="cd">' + esc(a.codigo || '') + '</div></div></div></td>' +
+        '<td><div class="cell-art"><img src="' + fotoDe(a) + '" alt=""><div><div class="nm">' + esc(a.nombre) + tagDescontinuado(a) + '</div><div class="cd">' + esc(a.codigo || '') + '</div></div></div></td>' +
         '<td class="num"><strong>' + qf(s, a) + '</strong></td>' +
-        '<td class="num muted">' + qf(pp, a) + '</td>' +
+        '<td class="num muted">' + (a.descontinuado ? '—' : qf(pp, a)) + '</td>' +
         '<td class="num">' + (sg > 0 ? '<span class="badge badge--warn">+' + qf(sg, a) + '</span>' : '—') + '</td>' +
         '<td>' + badgeEstado(e) + '</td>' +
         '</tr>';
@@ -426,11 +430,11 @@
     arts.forEach(function (a) {
       var auto = S.promedioMensualAuto(a);
       html += '<tr data-rowp="' + a.id + '" data-search="' + esc((a.nombre + ' ' + (a.codigo || '')).toLowerCase()) + '">' +
-        '<td><div class="cell-art"><img src="' + fotoDe(a) + '" alt=""><div><div class="nm">' + esc(a.nombre) + '</div><div class="cd">' + esc(a.codigo || '') + '</div></div></div></td>' +
+        '<td><div class="cell-art"><img src="' + fotoDe(a) + '" alt=""><div><div class="nm">' + esc(a.nombre) + tagDescontinuado(a) + '</div><div class="cd">' + esc(a.codigo || '') + '</div></div></div></td>' +
         '<td class="num muted">' + qf(auto, a) + '</td>' +
         '<td class="num"><input class="qty-input" type="number" min="0" step="0.5" value="' + (a.promedioManual != null ? a.promedioManual : '') + '" placeholder="' + qf(auto, a) + '" data-prom="' + a.id + '"></td>' +
         '<td class="num"><input class="qty-input" type="number" min="0" step="0.5" value="' + (a.mesesPedido != null ? a.mesesPedido : '') + '" placeholder="' + esc(m.mesesPedidoDefault) + '" data-meses="' + a.id + '"></td>' +
-        '<td class="num" data-pp="' + a.id + '"><strong>' + qf(S.puntoPedido(a), a) + '</strong></td>' +
+        '<td class="num" data-pp="' + a.id + '">' + (a.descontinuado ? '<span class="muted">—</span>' : '<strong>' + qf(S.puntoPedido(a), a) + '</strong>') + '</td>' +
         '</tr>';
     });
     html += '</tbody></table></div></div>';
@@ -446,7 +450,7 @@
     });
     // Vista previa del punto de pedido al editar (sin guardar)
     function preview(id) {
-      var a = S.getArticulo(id); if (!a) return;
+      var a = S.getArticulo(id); if (!a || a.descontinuado) return; // discontinuado: no tiene punto de pedido
       var promI = $('[data-prom="' + id + '"]'), mesI = $('[data-meses="' + id + '"]');
       var meta = S.getMeta();
       var prom = promI.value === '' ? S.promedioMensualAuto(a) : (parseFloat(promI.value) || 0);
