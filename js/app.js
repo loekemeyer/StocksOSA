@@ -651,7 +651,7 @@
     var nota = 'Ventas OSA ' + notaPeriodo;
     var coincide = r.totalInforme != null && r.totalInforme === r.totalParseado;
 
-    // El informe de OSA viene en UNIDADES -> a cajas con la uxc de cada artículo.
+    // El informe de OSA viene en UNIDADES (canónico). La caja es solo referencia (÷ uxc).
     var totalCajas = 0, sinUxc = 0;
     var detalle = r.filas.map(function (f) {
       var art = f.articuloId ? S.getArticulo(f.articuloId) : null;
@@ -686,8 +686,8 @@
       '<br>Total informe (u): <strong>' + (r.totalInforme != null ? fmtInt(r.totalInforme) : '—') + '</strong> · ' +
       'Suma leída (u): <strong style="color:' + (coincide ? 'var(--ok)' : 'var(--warn)') + '">' + fmtInt(r.totalParseado) + '</strong>' +
       (r.totalInforme != null && !coincide ? ' — no coinciden, revisá' : '') +
-      '<br>A descontar del stock: <strong>' + fmtInt(totalCajas) + '</strong> cajas (' + fmtInt(r.totalParseado) + ' u)' +
-      (sinUxc ? '<br><span style="color:var(--warn)">' + sinUxc + ' artículo(s) sin Uni×Caja conocida: cuento 1 u = 1 caja.</span>' : '') +
+      '<br>A descontar del stock: <strong>' + fmtInt(r.totalParseado) + '</strong> unidades (' + fmtInt(totalCajas) + ' cajas)' +
+      (sinUxc ? '<br><span style="color:var(--warn)">' + sinUxc + ' artículo(s) sin Uni×Caja conocida: en cajas se cuentan 1 u = 1 caja.</span>' : '') +
       '</div></div>';
 
     var body = resumen +
@@ -703,7 +703,7 @@
     function chkQ() {
       var c = S.quincenaCargada($('#impQuincena').value);
       $('#impQAviso').innerHTML = c
-        ? '<div class="callout" style="margin:0;border-color:var(--warn);"><svg viewBox="0 0 24 24"><path d="M1 21h22L12 2 1 21zm12-3h-2v-2h2v2zm0-4h-2v-4h2v4z"/></svg><div><strong style="color:var(--warn)">Esa quincena ya tiene ' + c.count + ' ventas cargadas (' + fmtInt(c.totalCajas) + ' cajas).</strong> Si confirmás, se suman de nuevo (doble carga).</div></div>'
+        ? '<div class="callout" style="margin:0;border-color:var(--warn);"><svg viewBox="0 0 24 24"><path d="M1 21h22L12 2 1 21zm12-3h-2v-2h2v2zm0-4h-2v-4h2v4z"/></svg><div><strong style="color:var(--warn)">Esa quincena ya tiene ' + c.count + ' ventas cargadas (' + fmtInt(c.totalUnidades) + ' u).</strong> Si confirmás, se suman de nuevo (doble carga).</div></div>'
         : '';
     }
     $('#impQuincena').addEventListener('change', chkQ); chkQ();
@@ -712,12 +712,12 @@
       var qk = $('#impQuincena').value;
       var qObj = S.quincenaDe(qk.slice(0, 8) + (qk.slice(-1) === '1' ? '01' : '16'));
       var fech = qObj ? qObj.hasta : fechaRep;
-      var batch = detalle.filter(function (d) { return d.art && d.cajas > 0; })
-        .map(function (d) { return { articuloId: d.art.id, tipo: 'venta', cantidad: d.cajas, fecha: fech, nota: nota, quincena: qk }; });
+      var batch = detalle.filter(function (d) { return d.art && d.f.ventas > 0; })
+        .map(function (d) { return { articuloId: d.art.id, tipo: 'venta', cantidad: d.f.ventas, fecha: fech, nota: nota, quincena: qk }; });
       if (!batch.length) { toast('No hay ventas para importar', 'warn'); return; }
       S.addMovimientosBatch(batch);
       closeModal();
-      toast('Importadas ' + batch.length + ' ventas (' + fmtInt(totalCajas) + ' cajas / ' + fmtInt(r.totalParseado) + ' u)', 'ok');
+      toast('Importadas ' + batch.length + ' ventas (' + fmtInt(r.totalParseado) + ' u / ' + fmtInt(totalCajas) + ' cajas)', 'ok');
       var pend = S.pedidoSugerido().length;
       render();
       if (pend) setTimeout(function () { toast(pend + ' artículo(s) necesitan reposición', 'warn'); }, 700);
@@ -775,35 +775,35 @@
         '<td>' + esc(f.codigo) + '</td>' +
         '<td>' + (ok ? esc(f.nombre) : '<span class="muted">' + esc(f.descripcion || '—') + ' · no está en el catálogo</span>') + '</td>' +
         '<td>' + esc(fmtFecha(f.fecha)) + '</td>' +
-        '<td class="num"><strong>' + fmtInt(f.cantidadCajas) + '</strong></td>' +
-        '<td class="num muted">' + fmtInt(f.unidades) + '</td></tr>';
+        '<td class="num"><strong>' + fmtInt(f.unidades) + '</strong></td>' +
+        '<td class="num muted">' + fmtInt(f.cajas) + '</td></tr>';
     }).join('');
 
     var badge = '<span class="badge badge--' + (enCajas ? 'ok' : 'warn') + '">Detectado: archivo en ' + (enCajas ? 'CAJAS' : 'UNIDADES') + '</span>';
     var resumen = '<div class="callout" style="margin-bottom:14px;"><svg viewBox="0 0 24 24"><path d="M12 2a10 10 0 1 0 0 20 10 10 0 0 0 0-20zm1 15h-2v-6h2v6zm0-8h-2V7h2v2z"/></svg><div>' +
       badge + ' &nbsp; Fecha(s) <strong>' + esc(periodoTxt) + '</strong> · ' + r.matchCount + ' de ' + r.filas.length + ' reconocidos' +
       (r.noEncontrados.length ? ' · <span style="color:var(--warn)">' + r.noEncontrados.length + ' sin coincidencia</span>' : '') +
-      '<br>A registrar (suma al stock): <strong>' + fmtInt(r.totalCajas) + '</strong> cajas · <strong>' + fmtInt(r.totalUnidades) + '</strong> unidades' +
+      '<br>A registrar (suma al stock): <strong>' + fmtInt(r.totalUnidades) + '</strong> unidades · <strong>' + fmtInt(r.totalCajas) + '</strong> cajas' +
       (enCajas
-        ? '<br><span class="muted">Detecté las Uni×Caja desde el archivo y las actualizo en el catálogo.</span>'
-        : '<br><span class="muted">El archivo vino en unidades; lo convierto a cajas con las Uni×Caja del catálogo.</span>') +
+        ? '<br><span class="muted">Detecté las Uni×Caja del archivo (las actualizo en el catálogo) y lo paso a unidades.</span>'
+        : '<br><span class="muted">El archivo vino en unidades: se guardan directo.</span>') +
       (yaImportado ? '<br><strong style="color:var(--warn)">⚠ Ya importaste entregas en esa(s) fecha(s) (' + yaImportado + ' movimientos). Si confirmás, se suman de nuevo.</strong>' : '') +
       '</div></div>';
 
     var body = resumen +
-      '<div class="table-wrap" style="max-height:320px;overflow:auto;"><table class="table"><thead><tr><th>Código</th><th>Artículo</th><th>Fecha</th><th class="num">Cajas</th><th class="num">Unidades</th></tr></thead><tbody>' + listado + '</tbody></table></div>' +
+      '<div class="table-wrap" style="max-height:320px;overflow:auto;"><table class="table"><thead><tr><th>Código</th><th>Artículo</th><th>Fecha</th><th class="num">Unidades</th><th class="num">Cajas</th></tr></thead><tbody>' + listado + '</tbody></table></div>' +
       '<div class="form-actions"><button type="button" class="btn btn--ghost" data-close>Cancelar</button>' +
       '<button type="button" class="btn btn--primary" id="entConfirm">Confirmar entregas</button></div>';
     openModal('Revisar entregas a registrar', body);
 
     $('#entConfirm').addEventListener('click', function () {
       if (enCajas && r.uxcDerivado) S.actualizarUxcDesde(r.uxcDerivado); // mantener Uni×Caja al día
-      var batch = r.filas.filter(function (f) { return f.articuloId && f.cantidadCajas > 0; })
-        .map(function (f) { return { articuloId: f.articuloId, tipo: 'entrega', cantidad: f.cantidadCajas, fecha: f.fecha || S.hoyISO(), nota: nota }; });
+      var batch = r.filas.filter(function (f) { return f.articuloId && f.unidades > 0; })
+        .map(function (f) { return { articuloId: f.articuloId, tipo: 'entrega', cantidad: f.unidades, fecha: f.fecha || S.hoyISO(), nota: nota }; });
       if (!batch.length) { toast('No hay entregas para registrar', 'warn'); return; }
       S.addMovimientosBatch(batch);
       closeModal();
-      toast('Registradas ' + batch.length + ' entregas (' + fmtInt(r.totalCajas) + ' cajas / ' + fmtInt(r.totalUnidades) + ' u)', 'ok');
+      toast('Registradas ' + batch.length + ' entregas (' + fmtInt(r.totalUnidades) + ' u / ' + fmtInt(r.totalCajas) + ' cajas)', 'ok');
       render();
     });
   }

@@ -32,13 +32,14 @@ siempre **por importación** (no se tipea a mano); al importar ventas elegís a 
 
 ### Cajas / Unidades
 
-Arriba de todo hay un **toggle Cajas ⇄ Unidades** que cambia cómo se *muestran* las
-cantidades en toda la app (el stock se guarda siempre en cajas). La conversión usa las
-**unidades por caja** de cada artículo.
+El stock se guarda siempre en **unidades** (el stock inicial, las entregas y las ventas
+vienen en unidades). Arriba de todo hay un **toggle Cajas ⇄ Unidades** que cambia cómo se
+*muestran* las cantidades en toda la app: en cajas se divide por las **unidades por caja**
+de cada artículo.
 
 El Excel de entregas puede venir **en unidades o en cajas**, y la app lo **detecta sola**:
 si `Cantidad × Precio = Importe` está en unidades; si no, está en cajas y de ahí saca las
-unidades por caja. En cualquier caso el stock se registra correctamente en cajas.
+unidades por caja. En cualquier caso el stock se registra correctamente en unidades.
 
 ## 🖥️ Usarla
 

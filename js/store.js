@@ -94,7 +94,8 @@
   function setMeta(patch) { state.meta = Object.assign(state.meta, patch); save(); }
 
   /* ---------- Unidades de visualización (cajas / unidades) ---------- */
-  // El stock se guarda siempre en CAJAS (canónico). Esto solo cambia cómo se MUESTRA.
+  // El stock se guarda siempre en UNIDADES (canónico: el stock inicial, las
+  // entregas y las ventas vienen en unidades). Esto solo cambia cómo se MUESTRA.
   function getUnidadVista() { return state.meta.unidadVista === 'unidades' ? 'unidades' : 'cajas'; }
   function setUnidadVista(v) {
     state.meta.unidadVista = (v === 'unidades') ? 'unidades' : 'cajas';
@@ -106,9 +107,11 @@
     var u = a && a.uxc;
     return (u && u > 0) ? u : 1;
   }
-  // Convierte una cantidad en cajas a la unidad de vista activa (para mostrar).
-  function enVista(cajas, idOrArt) {
-    return getUnidadVista() === 'unidades' ? Math.round((cajas || 0) * uxcDe(idOrArt)) : Math.round(cajas || 0);
+  // Convierte una cantidad canónica (UNIDADES) a la unidad de vista activa.
+  function enVista(unidades, idOrArt) {
+    return getUnidadVista() === 'cajas'
+      ? Math.round((unidades || 0) / uxcDe(idOrArt))
+      : Math.round(unidades || 0);
   }
   // Actualiza las Uni×Caja de varios artículos desde un import en cajas. Devuelve cuántas cambió.
   function actualizarUxcDesde(map) {
@@ -446,22 +449,21 @@
       if (art) matchCount++; else noEncontrados.push(codRaw);
       if (formato === 'cajas' && uxcFila && uxcFila > 1) uxcDerivado[codRaw] = uxcFila;
 
-      var uxcArt = art ? uxcDe(art) : 1;
-      var cantidadCajas, unidades;
-      if (formato === 'cajas') {                 // ya viene en cajas
-        cantidadCajas = cantOrig;
-        unidades = cantOrig * (uxcFila || uxcArt);
-      } else {                                   // viene en unidades -> a cajas
-        var u = uxcFila && uxcFila > 1 ? uxcFila : uxcArt; // normalmente uxc del catálogo
-        cantidadCajas = u > 1 ? Math.round(cantOrig / u) : cantOrig;
+      var u = (uxcFila && uxcFila > 1) ? uxcFila : (art ? uxcDe(art) : 1);
+      var unidades, cajas;
+      if (formato === 'cajas') {                 // viene en cajas -> a unidades (canónico)
+        unidades = cantOrig * u;
+        cajas = cantOrig;
+      } else {                                   // ya viene en unidades (canónico)
         unidades = cantOrig;
+        cajas = u > 1 ? Math.round(cantOrig / u) : cantOrig;
       }
       if (fecha) fechas[fecha] = true;
-      totalCajas += cantidadCajas;
       totalUnidades += unidades;
+      totalCajas += cajas;
       filas.push({
-        codigo: codRaw, cantidadCajas: cantidadCajas, unidades: unidades,
-        cantidadOriginal: cantOrig, uxc: (uxcFila || uxcArt), fecha: fecha,
+        codigo: codRaw, unidades: unidades, cajas: cajas,
+        cantidadOriginal: cantOrig, uxc: u, fecha: fecha,
         descripcion: (r[codCol + 1] != null ? String(r[codCol + 1]).trim() : ''),
         articuloId: art ? art.id : null, nombre: art ? art.nombre : null
       });
@@ -515,8 +517,8 @@
       var k = m.quincena || ((quincenaDe(m.fecha) || {}).key);
       if (!k) return;
       if (!map[k]) map[k] = { key: k, totalCajas: 0, totalUnidades: 0, count: 0, fechaCarga: null };
-      map[k].totalCajas += m.cantidad;
-      map[k].totalUnidades += m.cantidad * uxcDe(m.articuloId);
+      map[k].totalUnidades += m.cantidad;
+      map[k].totalCajas += Math.round(m.cantidad / uxcDe(m.articuloId));
       map[k].count++;
       if (!map[k].fechaCarga || m.fecha > map[k].fechaCarga) map[k].fechaCarga = m.fecha;
     });
@@ -745,9 +747,9 @@
       st.articulos.push({
         id: 'a_' + codigo, codigo: codigo, nombre: nombre, descripcion: '',
         foto: placeholder(nombre), precio: 0,
-        stockInicial: STOCK_INICIAL[codigo] || 0, // stock real del cliente (Diferencia, informe 23/06/26)
-        totalHistorico: total,        // ventas conocidas en periodoMeses (base del promedio mensual)
-        uxc: uxcSeed(codigo),         // unidades por caja (para vista en unidades / normalizar imports)
+        stockInicial: STOCK_INICIAL[codigo] || 0, // stock real del cliente EN UNIDADES (Existencia, informe 23/06/26)
+        totalHistorico: total,        // ventas conocidas (unidades) en periodoMeses (base del promedio mensual)
+        uxc: uxcSeed(codigo),         // unidades por caja (para mostrar en cajas / normalizar imports)
         promedioManual: null,         // sin override: usa el promedio automático
         mesesPedido: null,            // sin override: usa meta.mesesPedidoDefault
         activo: true
