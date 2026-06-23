@@ -11,7 +11,7 @@ cuánto se vendió y cuándo conviene reponer — todo automático.
 Stock hoy = Stock inicial + Entregas de Loeke − Ventas de OSA
 ```
 
-La app está organizada en **5 módulos**:
+La app está organizada en **6 módulos**:
 
 1. **Stocks** — el stock de hoy, el *punto de pedido* y el *pedido sugerido* de cada artículo.
 2. **Movimientos** — `inicial + entregas − ventas = stock hoy`. Tocás un artículo y ves cada
@@ -19,12 +19,16 @@ La app está organizada en **5 módulos**:
 3. **Punto de pedido** — `promedio de ventas × meses de cobertura`. El promedio es automático
    (o lo sobrescribís) y los meses son globales (o por artículo).
 4. **Entregas Loeke** — lo que Loeke entrega a OSA (entra al stock). Se carga
-   **importando el Excel de facturación** (.xls/.xlsx) con revisión previa, o a mano.
+   **importando el Excel de facturación** (.xls/.xlsx); detecta solo si viene en cajas o unidades.
 5. **Ventas OSA** — lo que OSA vende a sus clientes (sale del stock). Se carga
-   **importando el informe** (PDF con texto, o pegando el texto) con revisión previa,
-   o a mano. Cruza por código (`L031` = `031`, `L529` = `529E`).
+   **importando el informe** (PDF con texto, o pegando el texto). Viene en **unidades**:
+   se pasa a cajas con las *Uni×Caja*. Cruza por código (`L031` = `031`, `L529` = `529E`).
+6. **Control de cargas** — las ventas se cargan **por quincena** (1–15 y 16–fin de mes).
+   El módulo muestra **qué quincenas ya se cargaron y cuáles faltan**, y al importar te
+   avisa si esa quincena ya estaba cargada (para no duplicar).
 
-El **pedido sugerido** es `punto de pedido − stock hoy`, cuando da positivo.
+El **pedido sugerido** es `punto de pedido − stock hoy`, cuando da positivo. La carga es
+siempre **por importación** (no se tipea a mano); al importar ventas elegís a qué quincena imputarlas.
 
 ### Cajas / Unidades
 

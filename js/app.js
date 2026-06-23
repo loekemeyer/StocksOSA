@@ -26,6 +26,7 @@
     puntopedido: { title: 'Punto de pedido', sub: 'Promedio de ventas × meses de cobertura = punto de pedido' },
     entregas:    { title: 'Entregas Loeke', sub: 'Mercadería que Loeke entrega a OSA (entra al stock)' },
     ventas:      { title: 'Ventas OSA', sub: 'Ventas de OSA a sus clientes (salen del stock)' },
+    cargas:      { title: 'Control de cargas', sub: 'Ventas de OSA por quincena: cargadas y pendientes' },
     config:      { title: 'Configuración', sub: 'Datos, respaldo y preferencias' }
   };
 
@@ -54,6 +55,9 @@
   // Suma una lista de {cajas, art} en la unidad activa (los totales no se pueden
   // multiplicar por una constante porque la uxc varía por artículo).
   function qSum(items) { return items.reduce(function (acc, it) { return acc + S.enVista(it.cajas, it.art); }, 0); }
+  // Objeto/etiqueta de una quincena a partir de su clave 'AAAA-MM-Q1'/'Q2'.
+  function qObj(key) { return key ? S.quincenaDe(key.slice(0, 8) + (key.slice(-1) === '1' ? '01' : '16')) : null; }
+  function qLabel(key) { var q = qObj(key); return q ? q.label : (key || '—'); }
   function fmtMoney(n) {
     var m = S.getMeta().moneda || 'ARS';
     try { return new Intl.NumberFormat('es-AR', { style: 'currency', currency: m, maximumFractionDigits: 0 }).format(n || 0); }
@@ -142,14 +146,15 @@
     if (ui.view === 'stocks') actions = btn('nuevo-art', 'primary', iconPlus(), 'Nuevo artículo') + btn('print-sugerido', 'ghost', iconPrint(), 'Imprimir sugerido');
     else if (ui.view === 'movimientos') actions = btn('nuevo-ajuste', 'ghost', iconPlus(), 'Ajuste manual');
     else if (ui.view === 'puntopedido') actions = btn('guardar-punto', 'primary', iconSave(), 'Guardar');
-    else if (ui.view === 'entregas') actions = btn('guardar-entregas', 'primary', iconSave(), 'Registrar entregas');
-    else if (ui.view === 'ventas') actions = btn('guardar-ventas', 'primary', iconSave(), 'Guardar ventas');
+    else if (ui.view === 'entregas') actions = btn('importar-entregas', 'primary', iconUpload(), 'Importar Excel');
+    else if (ui.view === 'ventas') actions = btn('importar-ventas', 'primary', iconUpload(), 'Importar informe');
+    else if (ui.view === 'cargas') actions = btn('importar-ventas', 'primary', iconUpload(), 'Importar informe');
     $('#topbarActions').innerHTML = actions;
     renderUnitToggle();
 
     var fn = ({
       stocks: renderStocks, movimientos: renderMovimientos, puntopedido: renderPunto,
-      entregas: renderEntregas, ventas: renderVentas, config: renderConfig
+      entregas: renderEntregas, ventas: renderVentas, cargas: renderControl, config: renderConfig
     })[ui.view];
     viewEl.innerHTML = fn ? fn() : '';
     if (afterRender[ui.view]) afterRender[ui.view]();
@@ -179,6 +184,8 @@
   function iconBell() { return '<svg viewBox="0 0 24 24"><path d="M12 22a2.5 2.5 0 0 0 2.45-2h-4.9A2.5 2.5 0 0 0 12 22zm6-6V11a6 6 0 0 0-5-5.9V4a1 1 0 1 0-2 0v1.1A6 6 0 0 0 6 11v5l-2 2v1h16v-1l-2-2z"/></svg>'; }
   function iconCart() { return '<svg viewBox="0 0 24 24"><path d="M7 18a2 2 0 1 0 0 4 2 2 0 0 0 0-4zm10 0a2 2 0 1 0 0 4 2 2 0 0 0 0-4zM6.2 4l.9 2H20a1 1 0 0 1 1 1.3l-2.4 8.3A2 2 0 0 1 16.6 17H8.5a2 2 0 0 1-1.9-1.5L4.3 6.5 3.6 4z"/></svg>'; }
   function iconUpload() { return '<svg viewBox="0 0 24 24"><path d="M12 4l5 5-1.4 1.4L13 7.8V16h-2V7.8L8.4 10.4 7 9l5-5zM5 18h14v2H5z"/></svg>'; }
+  function iconCalendar() { return '<svg viewBox="0 0 24 24"><path d="M7 2v2H5a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V6a2 2 0 0 0-2-2h-2V2h-2v2H9V2H7zm12 7v10H5V9h14zM7 11v2h2v-2H7zm4 0v2h2v-2h-2zm4 0v2h2v-2h-2z"/></svg>'; }
+  function iconCheck() { return '<svg viewBox="0 0 24 24"><path d="M9 16.2 4.8 12l-1.4 1.4L9 19 21 7l-1.4-1.4z"/></svg>'; }
 
   function badgeEstado(e) {
     if (e === 'sin') return '<span class="badge badge--danger"><span class="dot"></span>Sin stock</span>';
@@ -481,94 +488,87 @@
   function renderCarga(tipo) {
     var arts = S.getArticulos({ soloActivos: true });
     if (!arts.length) return emptyApp();
-    var stocks = S.computeStocks();
     var esVenta = tipo === 'venta';
-    var titulo = esVenta ? 'Ventas de OSA a sus clientes' : 'Entregas de Loeke a OSA';
     var explica = esVenta
       ? 'Cargá las cajas que OSA <strong>vendió</strong> a sus clientes. Salen del stock.'
       : 'Cargá las cajas que <strong>Loeke entregó</strong> a OSA. Entran al stock.';
-    var fmtFut = esVenta ? 'Importá el informe completo (PDF o texto) con el botón de abajo, o cargá a mano en la tabla.' : 'Importá el Excel de facturación (Loeke a OSA) con el botón de abajo, o cargá a mano en la tabla.';
+    var fmtFut = esVenta
+      ? 'Importá el informe de ventas (PDF o texto). Viene en <strong>unidades</strong>: lo paso a cajas solo. Elegís la quincena al confirmar y el módulo <strong>Cargas</strong> lleva el control.'
+      : 'Importá el Excel de facturación (Loeke a OSA). Detecto solo si viene en cajas o en unidades.';
 
     var html = '<div class="callout"><svg viewBox="0 0 24 24"><path d="M12 2a10 10 0 1 0 0 20 10 10 0 0 0 0-20zm1 15h-2v-6h2v6zm0-8h-2V7h2v2z"/></svg><div>' + explica + ' <span class="muted">' + fmtFut + '</span></div></div>';
-    html += '<div class="row" style="margin-top:14px;">' +
+    html += '<div class="row" style="margin-top:16px;">' +
       (esVenta ? btn('importar-ventas', 'primary', iconUpload(), 'Importar informe (PDF / texto)')
-               : btn('importar-entregas', 'primary', iconUpload(), 'Importar Excel (Loeke → OSA)')) + '</div>';
-    html += '<div class="card" style="margin-top:18px;">';
-    html += '<div class="card__head"><h2>' + titulo + (esVenta ? ' · carga manual' : '') + '</h2><div class="spacer"></div>' +
-      '<label class="label" style="margin:0;display:flex;align-items:center;gap:8px;">Fecha' +
-      '<input class="input" id="cargaFecha" type="date" value="' + S.hoyISO() + '" style="width:auto;padding:8px 10px;"></label></div>';
-    html += '<div class="search" style="margin:0 18px 4px;flex:none;"><svg viewBox="0 0 24 24"><path d="M21 20l-5.6-5.6a7 7 0 1 0-1.4 1.4L20 21zM4 10a5 5 0 1 1 10 0 5 5 0 0 1-10 0z"/></svg>' +
-      '<input id="buscarCarga" type="text" placeholder="Buscar artículo…"></div>';
-    html += '<div class="table-wrap"><table class="table"><thead><tr>' +
-      '<th>Artículo</th><th class="num">Stock actual</th>' +
-      (esVenta ? '<th class="num">Vendidas</th>' : '<th class="num">Entregadas</th>') + '<th class="num">Quedaría</th>' +
-      '</tr></thead><tbody>';
-    arts.forEach(function (a) {
-      var s = stocks[a.id];
-      html += '<tr data-rowc data-search="' + esc((a.nombre + ' ' + (a.codigo || '')).toLowerCase()) + '">' +
-        '<td><div class="cell-art"><img src="' + fotoDe(a) + '" alt=""><div><div class="nm">' + esc(a.nombre) + '</div><div class="cd">' + esc(a.codigo || '') + '</div></div></div></td>' +
-        '<td class="num">' + fmtInt(s) + '</td>' +
-        '<td class="num"><input class="qty-input" type="number" min="0" step="1" value="" placeholder="0" data-qty="' + a.id + '" data-stock="' + s + '"></td>' +
-        '<td class="num" data-result="' + a.id + '">' + fmtInt(s) + '</td>' +
-        '</tr>';
-    });
-    html += '</tbody></table></div>';
-    html += '<div class="card__body" style="border-top:1px solid var(--line);"><div class="row" style="justify-content:flex-end;gap:10px;">' +
-      '<span class="muted" id="cargaResumen" style="margin-right:auto;">0 artículos cargados</span>' +
-      btn(esVenta ? 'guardar-ventas' : 'guardar-entregas', 'primary', iconSave(), esVenta ? 'Guardar ventas' : 'Registrar entregas') +
-      '</div></div>';
-    html += '</div>';
+               : btn('importar-entregas', 'primary', iconUpload(), 'Importar Excel (Loeke → OSA)')) +
+      (esVenta ? btn('ir-cargas', 'ghost', iconCalendar(), 'Ver control de cargas') : '') +
+      '</div>';
+
+    // Últimos movimientos del tipo, como referencia rápida de lo ya cargado.
+    var movs = S.getMovimientos({ tipo: esVenta ? 'venta' : 'entrega' }).slice(0, 8);
+    if (movs.length) {
+      html += '<div class="card" style="margin-top:18px;"><div class="card__head"><h2>Últimos registros</h2></div>' +
+        '<div class="table-wrap"><table class="table"><thead><tr><th>Fecha</th><th>Artículo</th>' +
+        (esVenta ? '<th>Quincena</th>' : '') + '<th class="num">Cantidad</th></tr></thead><tbody>';
+      movs.forEach(function (m) {
+        var a = S.getArticulo(m.articuloId); if (!a) return;
+        html += '<tr><td>' + fmtFecha(m.fecha) + '</td>' +
+          '<td><span class="nm">' + esc(a.nombre) + '</span> <span class="muted">' + esc(a.codigo || '') + '</span></td>' +
+          (esVenta ? '<td class="muted">' + esc(qLabel(m.quincena)) + '</td>' : '') +
+          '<td class="num"><strong>' + qf(Math.abs(m.cantidad), a) + '</strong></td></tr>';
+      });
+      html += '</tbody></table></div></div>';
+    }
     return html;
   }
   function renderVentas() { return renderCarga('venta'); }
   function renderEntregas() { return renderCarga('entrega'); }
 
-  function bindCarga(esVenta) {
-    var bc = $('#buscarCarga');
-    if (bc) bc.addEventListener('input', function () {
-      var q = bc.value.toLowerCase();
-      $$('[data-rowc]').forEach(function (tr) {
-        tr.style.display = (!q || tr.getAttribute('data-search').indexOf(q) >= 0) ? '' : 'none';
-      });
+  /* ============================================================
+     MÓDULO 6 · CONTROL DE CARGAS (ventas por quincena)
+     ============================================================ */
+  function renderControl() {
+    var cargas = S.cargasVentas();
+    var hoy = S.hoyISO();
+    var keys = Object.keys(cargas).sort();
+    // Rango: desde la 1ª quincena cargada (o la del baseline 16/06/26) hasta hoy.
+    var primera = keys.length ? qObj(keys[0]) : S.quincenaDe('2026-06-16');
+    var desdeISO = primera ? primera.desde : '2026-06-16';
+    var quincenas = S.listaQuincenas(desdeISO, hoy);
+    // Incluir quincenas cargadas que caigan fuera del rango (por las dudas).
+    keys.forEach(function (k) {
+      if (!quincenas.some(function (q) { return q.key === k; })) { var o = qObj(k); if (o) quincenas.push(o); }
     });
-    $$('[data-qty]').forEach(function (inp) {
-      inp.addEventListener('input', function () {
-        var id = inp.getAttribute('data-qty');
-        var s = parseFloat(inp.getAttribute('data-stock')) || 0;
-        var q = parseFloat(inp.value) || 0;
-        var res = esVenta ? s - q : s + q;
-        var cell = $('[data-result="' + id + '"]');
-        var a = S.getArticulo(id);
-        cell.textContent = fmtInt(res);
-        cell.style.color = res < 0 ? 'var(--danger)' : (res < S.puntoPedido(a) ? 'var(--warn)' : '');
-        cell.style.fontWeight = '700';
-        var n = $$('[data-qty]').filter(function (i) { return (parseFloat(i.value) || 0) > 0; }).length;
-        $('#cargaResumen').textContent = n + (n === 1 ? ' artículo cargado' : ' artículos cargados');
-      });
-    });
-  }
-  afterRender.ventas = function () { bindCarga(true); };
-  afterRender.entregas = function () { bindCarga(false); };
+    quincenas.sort(function (a, b) { return a.key < b.key ? -1 : 1; });
 
-  function guardarCarga(esVenta) {
-    var fecha = $('#cargaFecha') ? $('#cargaFecha').value : S.hoyISO();
-    var batch = [];
-    $$('[data-qty]').forEach(function (inp) {
-      var q = Math.round(parseFloat(inp.value) || 0);
-      if (q > 0) batch.push({ articuloId: inp.getAttribute('data-qty'), tipo: esVenta ? 'venta' : 'entrega', cantidad: q, fecha: fecha, nota: esVenta ? 'Venta OSA' : 'Entrega Loeke' });
+    var cargadas = quincenas.filter(function (q) { return cargas[q.key]; }).length;
+    var pendientes = quincenas.length - cargadas;
+    var uni = unidadVista() === 'unidades';
+
+    var html = '<div class="callout"><svg viewBox="0 0 24 24"><path d="M12 2a10 10 0 1 0 0 20 10 10 0 0 0 0-20zm1 15h-2v-6h2v6zm0-8h-2V7h2v2z"/></svg>' +
+      '<div>Cada quincena (1–15 y 16–fin de mes) se carga con el informe de ventas de OSA. Acá ves <strong>cuáles ya cargaste</strong> y <strong>cuáles faltan</strong>. Importás desde el botón de arriba o desde cada fila pendiente.</div></div>';
+
+    html += '<div class="stats" style="margin-top:16px;">';
+    html += stat('primary', iconCalendar(), 'Quincenas', fmtInt(quincenas.length), 'en el período');
+    html += stat('ok', iconCheck(), 'Cargadas', fmtInt(cargadas), 'con ventas');
+    html += stat(pendientes ? 'warn' : 'ok', iconBell(), 'Pendientes', fmtInt(pendientes), pendientes ? 'sin cargar' : 'al día');
+    html += '</div>';
+
+    html += '<div class="card" style="margin-top:18px;"><div class="table-wrap"><table class="table"><thead><tr>' +
+      '<th>Quincena</th><th>Rango</th><th>Estado</th><th class="num">Ventas cargadas (' + unidadCorta() + ')</th><th class="right"></th>' +
+      '</tr></thead><tbody>';
+    quincenas.slice().reverse().forEach(function (q) {
+      var c = cargas[q.key];
+      var total = c ? (uni ? c.totalUnidades : c.totalCajas) : 0;
+      html += '<tr>' +
+        '<td><strong>' + esc(q.label) + '</strong>' + (c && c.fechaCarga ? '<div class="cd">cargada ' + fmtFecha(c.fechaCarga) + '</div>' : '') + '</td>' +
+        '<td class="muted">' + fmtFecha(q.desde) + ' a ' + fmtFecha(q.hasta) + '</td>' +
+        '<td>' + (c ? '<span class="badge badge--ok"><span class="dot"></span>Cargada</span>' : '<span class="badge badge--warn"><span class="dot"></span>Pendiente</span>') + '</td>' +
+        '<td class="num">' + (c ? '<strong>' + fmtInt(total) + '</strong> <span class="muted">(' + c.count + ' art.)</span>' : '—') + '</td>' +
+        '<td class="right">' + (c ? '' : btn('importar-ventas', 'ghost btn--sm', iconUpload(), 'Importar')) + '</td>' +
+        '</tr>';
     });
-    if (!batch.length) { toast('Cargá al menos una cantidad', 'warn'); return; }
-    S.addMovimientosBatch(batch);
-    var n = batch.length;
-    if (esVenta) {
-      var pend = S.pedidoSugerido().length;
-      toast('Ventas guardadas: ' + n + ' artículo(s)', 'ok');
-      render();
-      if (pend) setTimeout(function () { toast(pend + ' artículo(s) necesitan reposición', 'warn'); }, 600);
-    } else {
-      toast('Entregas registradas: ' + n + ' artículo(s)', 'ok');
-      render();
-    }
+    html += '</tbody></table></div></div>';
+    return html;
   }
 
   /* ---------- Importar Ventas OSA (PDF con texto / texto pegado) ---------- */
@@ -645,47 +645,78 @@
   function previewImport(text) {
     var r = S.parseReporteVentas(text);
     if (!r.filas.length) { toast('No reconocí filas en el informe. Revisá el texto.', 'danger'); return; }
-    var fecha = r.periodo.hasta || S.hoyISO();
-    var notaPeriodo = r.periodo.desde ? (fmtFecha(r.periodo.desde) + ' a ' + fmtFecha(r.periodo.hasta)) : fmtFecha(fecha);
+    var hoy = S.hoyISO();
+    var fechaRep = r.periodo.hasta || hoy;
+    var notaPeriodo = r.periodo.desde ? (fmtFecha(r.periodo.desde) + ' a ' + fmtFecha(r.periodo.hasta)) : fmtFecha(fechaRep);
     var nota = 'Ventas OSA ' + notaPeriodo;
-    var yaImportado = S.getMovimientos().filter(function (m) { return m.nota === nota; }).length;
     var coincide = r.totalInforme != null && r.totalInforme === r.totalParseado;
 
-    var rows = r.filas.map(function (f) {
-      var ok = !!f.articuloId;
+    // El informe de OSA viene en UNIDADES -> a cajas con la uxc de cada artículo.
+    var totalCajas = 0, sinUxc = 0;
+    var detalle = r.filas.map(function (f) {
+      var art = f.articuloId ? S.getArticulo(f.articuloId) : null;
+      var uxc = art ? S.uxcDe(art) : 1;
+      var cajas = Math.round((f.ventas || 0) / uxc);
+      if (art) { totalCajas += cajas; if (uxc <= 1) sinUxc++; }
+      return { f: f, art: art, uxc: uxc, cajas: cajas };
+    });
+
+    var rows = detalle.map(function (d) {
+      var ok = !!d.art;
       return '<tr style="' + (ok ? '' : 'opacity:.55;') + '">' +
-        '<td>' + esc(f.codigoReporte) + '</td>' +
-        '<td>' + (ok ? esc(f.nombre) : '<span class="muted">' + esc(f.desc || '—') + ' · no está en el catálogo</span>') + '</td>' +
-        '<td class="num"><strong>' + fmtInt(f.ventas) + '</strong></td></tr>';
+        '<td>' + esc(d.f.codigoReporte) + '</td>' +
+        '<td>' + (ok ? esc(d.art.nombre) : '<span class="muted">' + esc(d.f.desc || '—') + ' · no está en el catálogo</span>') + '</td>' +
+        '<td class="num muted">' + fmtInt(d.f.ventas) + '</td>' +
+        '<td class="num"><strong>' + (ok ? fmtInt(d.cajas) : '—') + '</strong></td></tr>';
+    }).join('');
+
+    // Quincena a la que se imputa (default: la del fin del informe).
+    var qDef = S.quincenaDe(fechaRep) || S.quincenaDe(hoy);
+    var quincenas = S.listaQuincenas(r.periodo.desde || fechaRep, hoy > fechaRep ? hoy : fechaRep);
+    if (!quincenas.some(function (q) { return q.key === qDef.key; })) quincenas.push(qDef);
+    var optsQ = quincenas.map(function (q) {
+      return '<option value="' + q.key + '"' + (q.key === qDef.key ? ' selected' : '') + '>' +
+        esc(q.label) + (S.quincenaCargada(q.key) ? ' — ya cargada' : '') + '</option>';
     }).join('');
 
     var resumen = '<div class="callout" style="margin-bottom:14px;"><svg viewBox="0 0 24 24"><path d="M12 2a10 10 0 1 0 0 20 10 10 0 0 0 0-20zm1 15h-2v-6h2v6zm0-8h-2V7h2v2z"/></svg><div>' +
-      'Período <strong>' + esc(notaPeriodo) + '</strong> · ' + r.matchCount + ' de ' + r.filas.length + ' reconocidos' +
+      'Informe <strong>' + esc(notaPeriodo) + '</strong> · ' + r.matchCount + ' de ' + r.filas.length + ' reconocidos' +
       (r.noEncontrados.length ? ' · <span style="color:var(--warn)">' + r.noEncontrados.length + ' sin coincidencia</span>' : '') +
-      '<br>Total del informe: <strong>' + (r.totalInforme != null ? fmtInt(r.totalInforme) : '—') + '</strong> · ' +
-      'Suma leída: <strong style="color:' + (coincide ? 'var(--ok)' : 'var(--warn)') + '">' + fmtInt(r.totalParseado) + '</strong>' +
+      '<br>Total informe (u): <strong>' + (r.totalInforme != null ? fmtInt(r.totalInforme) : '—') + '</strong> · ' +
+      'Suma leída (u): <strong style="color:' + (coincide ? 'var(--ok)' : 'var(--warn)') + '">' + fmtInt(r.totalParseado) + '</strong>' +
       (r.totalInforme != null && !coincide ? ' — no coinciden, revisá' : '') +
-      (yaImportado ? '<br><strong style="color:var(--warn)">⚠ Ya importaste este período (' + yaImportado + ' movimientos). Si confirmás, se suman de nuevo.</strong>' : '') +
+      '<br>A descontar del stock: <strong>' + fmtInt(totalCajas) + '</strong> cajas (' + fmtInt(r.totalParseado) + ' u)' +
+      (sinUxc ? '<br><span style="color:var(--warn)">' + sinUxc + ' artículo(s) sin Uni×Caja conocida: cuento 1 u = 1 caja.</span>' : '') +
       '</div></div>';
 
     var body = resumen +
-      '<div class="row" style="gap:12px;align-items:center;margin-bottom:10px;">' +
-      '<label class="label" style="margin:0;display:flex;align-items:center;gap:8px;">Fecha de los movimientos' +
-      '<input class="input" id="impFecha" type="date" value="' + esc(fecha) + '" style="width:auto;"></label></div>' +
-      '<div class="table-wrap" style="max-height:320px;overflow:auto;"><table class="table"><thead><tr><th>Código</th><th>Artículo</th><th class="num">Ventas</th></tr></thead><tbody>' + rows + '</tbody></table></div>' +
+      '<div class="row" style="gap:12px;align-items:center;margin-bottom:6px;flex-wrap:wrap;">' +
+      '<label class="label" style="margin:0;display:flex;align-items:center;gap:8px;">Imputar a la quincena' +
+      '<select class="select" id="impQuincena" style="width:auto;">' + optsQ + '</select></label></div>' +
+      '<div id="impQAviso" style="margin-bottom:10px;"></div>' +
+      '<div class="table-wrap" style="max-height:300px;overflow:auto;"><table class="table"><thead><tr><th>Código</th><th>Artículo</th><th class="num">Ventas (u)</th><th class="num">Cajas</th></tr></thead><tbody>' + rows + '</tbody></table></div>' +
       '<div class="form-actions"><button type="button" class="btn btn--ghost" data-close>Cancelar</button>' +
       '<button type="button" class="btn btn--primary" id="impConfirm">Confirmar importación</button></div>';
     openModal('Revisar ventas a importar', body);
 
+    function chkQ() {
+      var c = S.quincenaCargada($('#impQuincena').value);
+      $('#impQAviso').innerHTML = c
+        ? '<div class="callout" style="margin:0;border-color:var(--warn);"><svg viewBox="0 0 24 24"><path d="M1 21h22L12 2 1 21zm12-3h-2v-2h2v2zm0-4h-2v-4h2v4z"/></svg><div><strong style="color:var(--warn)">Esa quincena ya tiene ' + c.count + ' ventas cargadas (' + fmtInt(c.totalCajas) + ' cajas).</strong> Si confirmás, se suman de nuevo (doble carga).</div></div>'
+        : '';
+    }
+    $('#impQuincena').addEventListener('change', chkQ); chkQ();
+
     $('#impConfirm').addEventListener('click', function () {
-      var fech = $('#impFecha').value || fecha;
-      var batch = r.filas.filter(function (f) { return f.articuloId && f.ventas > 0; })
-        .map(function (f) { return { articuloId: f.articuloId, tipo: 'venta', cantidad: f.ventas, fecha: fech, nota: nota }; });
+      var qk = $('#impQuincena').value;
+      var qObj = S.quincenaDe(qk.slice(0, 8) + (qk.slice(-1) === '1' ? '01' : '16'));
+      var fech = qObj ? qObj.hasta : fechaRep;
+      var batch = detalle.filter(function (d) { return d.art && d.cajas > 0; })
+        .map(function (d) { return { articuloId: d.art.id, tipo: 'venta', cantidad: d.cajas, fecha: fech, nota: nota, quincena: qk }; });
       if (!batch.length) { toast('No hay ventas para importar', 'warn'); return; }
       S.addMovimientosBatch(batch);
       closeModal();
-      var cajas = batch.reduce(function (a, b) { return a + b.cantidad; }, 0);
-      toast('Importadas ' + batch.length + ' ventas (' + fmtInt(cajas) + ' cajas)', 'ok');
+      toast('Importadas ' + batch.length + ' ventas (' + fmtInt(totalCajas) + ' cajas / ' + fmtInt(r.totalParseado) + ' u)', 'ok');
       var pend = S.pedidoSugerido().length;
       render();
       if (pend) setTimeout(function () { toast(pend + ' artículo(s) necesitan reposición', 'warn'); }, 700);
@@ -1046,11 +1077,10 @@
     if (act === 'nuevo-art') openArticulo(null);
     else if (act === 'print-sugerido') imprimirSugerido();
     else if (act === 'guardar-punto') guardarPunto();
-    else if (act === 'guardar-ventas') guardarCarga(true);
-    else if (act === 'guardar-entregas') guardarCarga(false);
     else if (act === 'nuevo-ajuste') openAjuste();
     else if (act === 'importar-ventas') openImportVentas();
     else if (act === 'importar-entregas') openImportEntregas();
+    else if (act === 'ir-cargas') setView('cargas');
     else if (act === 'toggle-unit') {
       S.setUnidadVista(unidadVista() === 'unidades' ? 'cajas' : 'unidades');
       render();

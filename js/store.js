@@ -185,7 +185,8 @@
       tipo: m.tipo,
       cantidad: Math.round(num(m.cantidad, 0)),
       fecha: m.fecha || hoyISO(),
-      nota: (m.nota || '').trim()
+      nota: (m.nota || '').trim(),
+      quincena: m.quincena || null   // ventas: quincena (1–15 / 16–fin) a la que pertenece la carga
     };
     state.movimientos.push(mov);
     save();
@@ -202,7 +203,8 @@
         tipo: arr[i].tipo,
         cantidad: c,
         fecha: arr[i].fecha || hoyISO(),
-        nota: (arr[i].nota || '').trim()
+        nota: (arr[i].nota || '').trim(),
+        quincena: arr[i].quincena || null
       };
       state.movimientos.push(mov);
       creados.push(mov);
@@ -469,6 +471,60 @@
       fechas: Object.keys(fechas).sort(), noEncontrados: noEncontrados,
       matchCount: matchCount, uxcDerivado: uxcDerivado
     };
+  }
+
+  /* ---------- Quincenas de ventas (control de cargas) ----------
+     Cada mes tiene 2 quincenas: 1ª = días 1–15, 2ª = 16–fin de mes. Las ventas de
+     OSA se cargan por quincena; el módulo de control muestra cuáles están cargadas
+     y cuáles pendientes. La clave es 'AAAA-MM-Q1'/'AAAA-MM-Q2' (ordena alfabéticamente). */
+  var MESES_ES = ['enero', 'febrero', 'marzo', 'abril', 'mayo', 'junio', 'julio',
+    'agosto', 'septiembre', 'octubre', 'noviembre', 'diciembre'];
+  function ultimoDiaMes(anio, mes) { return new Date(anio, mes, 0).getDate(); } // mes 1–12
+  function quincenaDe(iso) {
+    if (!iso) return null;
+    var p = String(iso).slice(0, 10).split('-');
+    var anio = parseInt(p[0], 10), mes = parseInt(p[1], 10), dia = parseInt(p[2], 10);
+    if (!anio || !mes || !dia) return null;
+    var mitad = dia <= 15 ? 1 : 2;
+    return {
+      key: anio + '-' + pad(mes) + '-Q' + mitad,
+      anio: anio, mes: mes, mitad: mitad,
+      desde: anio + '-' + pad(mes) + '-' + (mitad === 1 ? '01' : '16'),
+      hasta: anio + '-' + pad(mes) + '-' + pad(mitad === 1 ? 15 : ultimoDiaMes(anio, mes)),
+      label: (mitad === 1 ? '1ª' : '2ª') + ' quincena de ' + MESES_ES[mes - 1] + ' ' + anio
+    };
+  }
+  function quincenaSiguiente(q) {
+    if (q.mitad === 1) return quincenaDe(q.anio + '-' + pad(q.mes) + '-16');
+    var nm = q.mes === 12 ? 1 : q.mes + 1, na = q.mes === 12 ? q.anio + 1 : q.anio;
+    return quincenaDe(na + '-' + pad(nm) + '-01');
+  }
+  // Lista de quincenas entre dos fechas (inclusive), ordenada.
+  function listaQuincenas(desdeISO, hastaISO) {
+    var a = quincenaDe(desdeISO), b = quincenaDe(hastaISO);
+    if (!a || !b || a.key > b.key) return a && !b ? [a] : [];
+    var out = [], cur = a, guard = 0;
+    while (cur.key <= b.key && guard++ < 600) { out.push(cur); cur = quincenaSiguiente(cur); }
+    return out;
+  }
+  // Ventas cargadas agrupadas por quincena: key -> {key, totalCajas, count, fechaCarga}.
+  function cargasVentas() {
+    var map = {};
+    state.movimientos.forEach(function (m) {
+      if (m.tipo !== 'venta') return;
+      var k = m.quincena || ((quincenaDe(m.fecha) || {}).key);
+      if (!k) return;
+      if (!map[k]) map[k] = { key: k, totalCajas: 0, totalUnidades: 0, count: 0, fechaCarga: null };
+      map[k].totalCajas += m.cantidad;
+      map[k].totalUnidades += m.cantidad * uxcDe(m.articuloId);
+      map[k].count++;
+      if (!map[k].fechaCarga || m.fecha > map[k].fechaCarga) map[k].fechaCarga = m.fecha;
+    });
+    return map;
+  }
+  function quincenaCargada(key) {
+    var c = cargasVentas()[key];
+    return (c && c.count > 0) ? c : null;
   }
 
   /* ---------- Pedidos ---------- */
@@ -807,6 +863,8 @@
     computeStocks: computeStocks, stockActual: stockActual, totales: totales,
     movimientosConSaldo: movimientosConSaldo,
     parseReporteVentas: parseReporteVentas, parseEntregas: parseEntregas,
+    quincenaDe: quincenaDe, listaQuincenas: listaQuincenas,
+    cargasVentas: cargasVentas, quincenaCargada: quincenaCargada,
     estado: estado, sugerido: sugerido, necesitaPedido: necesitaPedido, pedidoSugerido: pedidoSugerido,
     promedioMensual: promedioMensual, promedioMensualAuto: promedioMensualAuto,
     mesesPedido: mesesPedido, puntoPedido: puntoPedido,
