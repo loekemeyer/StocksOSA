@@ -8,7 +8,7 @@
   var KEY = 'stockrotativo.v1';
   // Versión del catálogo/seed precargado. Al subirla, el seed nuevo se aplica
   // solo en navegadores que todavía NO cargaron datos reales (meta.datosReales).
-  var SEED_VERSION = 3;
+  var SEED_VERSION = 4;
 
   /* ---------- Estado base ---------- */
   function blank() {
@@ -395,6 +395,24 @@
     ['524', 'Sacacorcho de espumantes', 2]
   ];
 
+  // Stock inicial real del cliente (OSA) · informe "Existencias" del 23/06/26.
+  // Códigos del informe = "L" + mi código, sin la "E" final (ej. mi 529E = L529).
+  // Excepción: algunos conservan la E (ej. 948E = L948E). Se toma la columna
+  // "Existencia" (stock físico). Lo que no figura o vino en blanco queda en 0.
+  var STOCK_INICIAL = {
+    '031': 2112, '222': 32, '315': 18, '395': 144, '396': 6, '478E': 13,
+    '501': 1020, '502': 780, '504': 1343, '505': 6108, '506': 2268, '507': 24,
+    '508': 100, '510': 1044, '511': 11, '512': 2, '513': 5364, '515': 48,
+    '518': 474, '519': 1220, '520': 150, '521': 336, '522E': 4, '523': 218,
+    '525E': 149, '529E': 88, '530': 252, '531': 360, '536E': 18, '540E': 17,
+    '542': 185, '543': 84, '544': 677, '546': 660, '548': 23, '551': 2,
+    '559': 96, '560': 4, '561': 4, '562': 276, '564': 9, '566E': 386,
+    '569': 12, '570': 14, '574E': 60, '577': 3, '579': 19, '580E': 12,
+    '583E': 16, '587': 491, '589E': 1627, '594': 20, '598E': 161, '931E': 240,
+    '932E': 226, '933E': 108, '934E': 241, '935E': 239, '936E': 314, '937E': 144,
+    '941E': 120, '942E': 45, '944E': 5, '948E': 10
+  };
+
   // Construye el estado inicial con el catálogo real precargado.
   function seedReal() {
     var st = blank();
@@ -411,7 +429,7 @@
       st.articulos.push({
         id: 'a_' + codigo, codigo: codigo, nombre: nombre, descripcion: '',
         foto: placeholder(nombre), precio: 0,
-        stockInicial: 0,                      // stock real de hoy = 0 (se carga el real más adelante)
+        stockInicial: STOCK_INICIAL[codigo] || 0, // stock real del cliente (informe 23/06/26)
         stockMaximo: max,
         puntoPedido: Math.round(promMes / 2), // referencia; el pedido repone hasta el máximo
         totalHistorico: total, activo: true
