@@ -18,8 +18,8 @@ La app está organizada en **5 módulos**:
    movimiento con el **saldo** resultante (filtrable por período).
 3. **Punto de pedido** — `promedio de ventas × meses de cobertura`. El promedio es automático
    (o lo sobrescribís) y los meses son globales (o por artículo).
-4. **Entregas Loeke** — lo que Loeke entrega a OSA (entra al stock). Carga manual;
-   *importación por Excel próximamente*.
+4. **Entregas Loeke** — lo que Loeke entrega a OSA (entra al stock). Se carga
+   **importando el Excel de facturación** (.xls/.xlsx) con revisión previa, o a mano.
 5. **Ventas OSA** — lo que OSA vende a sus clientes (sale del stock). Se carga
    **importando el informe** (PDF con texto, o pegando el texto) con revisión previa,
    o a mano. Cruza por código (`L031` = `031`, `L529` = `529E`).

@@ -302,11 +302,34 @@
     if (y < 100) y += 2000;
     return y + '-' + pad(mo) + '-' + pad(d);
   }
+  // Índice del catálogo por código (mayúsculas).
+  function idxCatalogo() {
+    var idx = {};
+    state.articulos.forEach(function (a) { if (a.codigo) idx[String(a.codigo).toUpperCase()] = a; });
+    return idx;
+  }
+  // Cruce de código tolerante: exacto, con "E" agregada (OSA quita la E: L529=529E)
+  // y con la "E" quitada (Loeke usa 946E donde el catálogo tiene 946).
+  function matchCodigo(c, idx) {
+    c = String(c).toUpperCase();
+    return idx[c] || idx[c + 'E'] || idx[c.replace(/E$/, '')] || null;
+  }
+  // Celda de fecha de Excel: Date, número de serie (1900) o texto -> ISO.
+  function celdaAFecha(v) {
+    if (v === null || v === undefined || v === '') return null;
+    if (v instanceof Date) return v.getFullYear() + '-' + pad(v.getMonth() + 1) + '-' + pad(v.getDate());
+    if (typeof v === 'number') {
+      var d = new Date(Math.round((v - 25569) * 86400000));
+      return d.getUTCFullYear() + '-' + pad(d.getUTCMonth() + 1) + '-' + pad(d.getUTCDate());
+    }
+    var s = String(v).trim();
+    if (/^\d{4}-\d{2}-\d{2}/.test(s)) return s.slice(0, 10);
+    return ddmmaaISO(s);
+  }
   function parseReporteVentas(text) {
     text = String(text || '');
     var lines = text.split(/\r?\n/);
-    var idx = {};
-    state.articulos.forEach(function (a) { if (a.codigo) idx[String(a.codigo).toUpperCase()] = a; });
+    var idx = idxCatalogo();
 
     var periodo = { desde: null, hasta: null };
     var mp = text.match(/Desde\s+(\d{1,2}\/\d{1,2}\/\d{2,4})\s+hasta\s+(\d{1,2}\/\d{1,2}\/\d{2,4})/i);
@@ -325,7 +348,7 @@
       var vm = rest.match(/(\d+)\s*$/);        // las ventas son el número al final
       var ventas = vm ? parseInt(vm[1], 10) : 0;
       var desc = vm ? rest.slice(0, vm.index).trim() : rest;
-      var art = idx[codigoReporte] || idx[codigoReporte + 'E'] || null;
+      var art = matchCodigo(codigoReporte, idx);
       if (art) matchCount++; else noEncontrados.push(codigoReporte);
       totalParseado += ventas;
       filas.push({
@@ -336,6 +359,52 @@
     return {
       periodo: periodo, filas: filas, totalParseado: totalParseado,
       totalInforme: totalInforme, noEncontrados: noEncontrados, matchCount: matchCount
+    };
+  }
+
+  /* ---------- Importación de Entregas Loeke (Módulo 4) ----------
+     Recibe las filas (array 2D) de un Excel de detalle de facturación (Loeke a
+     OSA). Detecta automáticamente la columna de "Cód. Artículo" (la que más
+     coincide con el catálogo); Cantidad va 3 columnas a la derecha (código,
+     descripción, bonificación, cantidad) y la Fecha en la primera columna.
+     Cada fila es una entrega que SUMA al stock. */
+  function parseEntregas(rows) {
+    rows = rows || [];
+    var idx = idxCatalogo();
+    var ncols = 0;
+    rows.forEach(function (r) { if (r && r.length > ncols) ncols = r.length; });
+    // Columna de código = la que más celdas cruza con el catálogo.
+    var codCol = 0, best = -1;
+    for (var c = 0; c < ncols; c++) {
+      var cnt = 0;
+      rows.forEach(function (r) {
+        var v = (r && r[c] != null) ? String(r[c]).trim() : '';
+        if (/^\d{2,4}[A-Za-z]?$/.test(v) && matchCodigo(v, idx)) cnt++;
+      });
+      if (cnt > best) { best = cnt; codCol = c; }
+    }
+    var cantCol = codCol + 3;
+    var filas = [], totalCantidad = 0, fechas = {}, noEncontrados = [], matchCount = 0;
+    rows.forEach(function (r) {
+      if (!r) return;
+      var codRaw = (r[codCol] != null) ? String(r[codCol]).trim() : '';
+      if (!/^\d{2,4}[A-Za-z]?$/.test(codRaw)) return;       // no es fila de datos
+      var cant = Math.round(num(r[cantCol], 0));
+      if (cant <= 0) return;
+      var fecha = celdaAFecha(r[0]);
+      var art = matchCodigo(codRaw, idx);
+      if (art) matchCount++; else noEncontrados.push(codRaw);
+      if (fecha) fechas[fecha] = true;
+      totalCantidad += cant;
+      filas.push({
+        codigo: codRaw, cantidad: cant, fecha: fecha,
+        descripcion: (r[codCol + 1] != null ? String(r[codCol + 1]).trim() : ''),
+        articuloId: art ? art.id : null, nombre: art ? art.nombre : null
+      });
+    });
+    return {
+      filas: filas, totalCantidad: totalCantidad, fechas: Object.keys(fechas).sort(),
+      noEncontrados: noEncontrados, matchCount: matchCount
     };
   }
 
@@ -650,7 +719,8 @@
     addMovimiento: addMovimiento, addMovimientosBatch: addMovimientosBatch,
     getMovimientos: getMovimientos, removeMovimiento: removeMovimiento,
     computeStocks: computeStocks, stockActual: stockActual, totales: totales,
-    movimientosConSaldo: movimientosConSaldo, parseReporteVentas: parseReporteVentas,
+    movimientosConSaldo: movimientosConSaldo,
+    parseReporteVentas: parseReporteVentas, parseEntregas: parseEntregas,
     estado: estado, sugerido: sugerido, necesitaPedido: necesitaPedido, pedidoSugerido: pedidoSugerido,
     promedioMensual: promedioMensual, promedioMensualAuto: promedioMensualAuto,
     mesesPedido: mesesPedido, puntoPedido: puntoPedido,

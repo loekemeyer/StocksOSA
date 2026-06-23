@@ -461,10 +461,12 @@
     var explica = esVenta
       ? 'Cargá las cajas que OSA <strong>vendió</strong> a sus clientes. Salen del stock.'
       : 'Cargá las cajas que <strong>Loeke entregó</strong> a OSA. Entran al stock.';
-    var fmtFut = esVenta ? 'Importá el informe completo (PDF o texto) con el botón de abajo, o cargá a mano en la tabla.' : 'Importación desde <strong>Excel</strong>: próximamente.';
+    var fmtFut = esVenta ? 'Importá el informe completo (PDF o texto) con el botón de abajo, o cargá a mano en la tabla.' : 'Importá el Excel de facturación (Loeke a OSA) con el botón de abajo, o cargá a mano en la tabla.';
 
     var html = '<div class="callout"><svg viewBox="0 0 24 24"><path d="M12 2a10 10 0 1 0 0 20 10 10 0 0 0 0-20zm1 15h-2v-6h2v6zm0-8h-2V7h2v2z"/></svg><div>' + explica + ' <span class="muted">' + fmtFut + '</span></div></div>';
-    if (esVenta) html += '<div class="row" style="margin-top:14px;">' + btn('importar-ventas', 'primary', iconUpload(), 'Importar informe (PDF / texto)') + '</div>';
+    html += '<div class="row" style="margin-top:14px;">' +
+      (esVenta ? btn('importar-ventas', 'primary', iconUpload(), 'Importar informe (PDF / texto)')
+               : btn('importar-entregas', 'primary', iconUpload(), 'Importar Excel (Loeke → OSA)')) + '</div>';
     html += '<div class="card" style="margin-top:18px;">';
     html += '<div class="card__head"><h2>' + titulo + (esVenta ? ' · carga manual' : '') + '</h2><div class="spacer"></div>' +
       '<label class="label" style="margin:0;display:flex;align-items:center;gap:8px;">Fecha' +
@@ -661,6 +663,83 @@
       var pend = S.pedidoSugerido().length;
       render();
       if (pend) setTimeout(function () { toast(pend + ' artículo(s) necesitan reposición', 'warn'); }, 700);
+    });
+  }
+
+  /* ---------- Importar Entregas Loeke (Excel .xls / .xlsx) ---------- */
+  // Lee el Excel con SheetJS (se carga bajo demanda desde CDN) -> filas (array 2D).
+  function xlsxAFilas(file) {
+    var SJS = 'https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js';
+    return (window.XLSX ? Promise.resolve() : cargarScript(SJS))
+      .then(function () { return file.arrayBuffer(); })
+      .then(function (buf) {
+        var wb = window.XLSX.read(new Uint8Array(buf), { type: 'array', cellDates: true });
+        var ws = wb.Sheets[wb.SheetNames[0]];
+        return window.XLSX.utils.sheet_to_json(ws, { header: 1, blankrows: false, defval: '' });
+      });
+  }
+  function openImportEntregas() {
+    var body = '<div class="form">' +
+      '<div class="imgdrop" id="entDrop" style="cursor:pointer;">' +
+      '<div class="imgdrop__text"><strong>Subir Excel de facturación</strong><span id="entFileName">Archivo .xls o .xlsx (Loeke a OSA).</span></div>' +
+      '<input type="file" id="entFile" accept=".xls,.xlsx,application/vnd.ms-excel,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" hidden>' +
+      '</div>' +
+      '<div class="hint">Detecta solo la columna de código (cruza con tu catálogo) y la cantidad. Cada fila es una entrega que <strong>suma</strong> al stock. Vas a poder revisar antes de confirmar.</div>' +
+      '<div class="form-actions"><button type="button" class="btn btn--ghost" data-close>Cancelar</button>' +
+      '<button type="button" class="btn btn--primary" id="entAnalizar">Analizar</button></div>' +
+      '</div>';
+    openModal('Importar entregas Loeke', body);
+    $('#entDrop').addEventListener('click', function () { $('#entFile').click(); });
+    $('#entFile').addEventListener('change', function (e) {
+      var f = e.target.files[0]; $('#entFileName').textContent = f ? f.name : '';
+    });
+    $('#entAnalizar').addEventListener('click', function () {
+      var f = $('#entFile').files[0];
+      if (!f) { toast('Elegí el archivo Excel', 'warn'); return; }
+      toast('Leyendo Excel…', 'info');
+      xlsxAFilas(f).then(function (rows) { previewEntregas(rows); })
+        .catch(function () { toast('No se pudo leer el Excel. Probá guardarlo como .xlsx.', 'danger'); });
+    });
+  }
+  function previewEntregas(rows) {
+    var r = S.parseEntregas(rows);
+    if (!r.filas.length) { toast('No reconocí filas de entrega en el Excel.', 'danger'); return; }
+    var periodoTxt = r.fechas.length ? r.fechas.map(fmtFecha).join(', ') : 'sin fecha';
+    var nota = 'Entrega Loeke (Excel)';
+    var yaImportado = S.getMovimientos({ tipo: 'entrega' }).filter(function (m) {
+      return m.nota === nota && r.fechas.indexOf(m.fecha) >= 0;
+    }).length;
+
+    var listado = r.filas.map(function (f) {
+      var ok = !!f.articuloId;
+      return '<tr style="' + (ok ? '' : 'opacity:.55;') + '">' +
+        '<td>' + esc(f.codigo) + '</td>' +
+        '<td>' + (ok ? esc(f.nombre) : '<span class="muted">' + esc(f.descripcion || '—') + ' · no está en el catálogo</span>') + '</td>' +
+        '<td>' + esc(fmtFecha(f.fecha)) + '</td>' +
+        '<td class="num"><strong>' + fmtInt(f.cantidad) + '</strong></td></tr>';
+    }).join('');
+
+    var resumen = '<div class="callout" style="margin-bottom:14px;"><svg viewBox="0 0 24 24"><path d="M12 2a10 10 0 1 0 0 20 10 10 0 0 0 0-20zm1 15h-2v-6h2v6zm0-8h-2V7h2v2z"/></svg><div>' +
+      'Fecha(s) <strong>' + esc(periodoTxt) + '</strong> · ' + r.matchCount + ' de ' + r.filas.length + ' reconocidos' +
+      (r.noEncontrados.length ? ' · <span style="color:var(--warn)">' + r.noEncontrados.length + ' sin coincidencia</span>' : '') +
+      '<br>Total a registrar: <strong>' + fmtInt(r.totalCantidad) + '</strong> cajas (suman al stock)' +
+      (yaImportado ? '<br><strong style="color:var(--warn)">⚠ Ya importaste entregas en esa(s) fecha(s) (' + yaImportado + ' movimientos). Si confirmás, se suman de nuevo.</strong>' : '') +
+      '</div></div>';
+
+    var body = resumen +
+      '<div class="table-wrap" style="max-height:320px;overflow:auto;"><table class="table"><thead><tr><th>Código</th><th>Artículo</th><th>Fecha</th><th class="num">Cantidad</th></tr></thead><tbody>' + listado + '</tbody></table></div>' +
+      '<div class="form-actions"><button type="button" class="btn btn--ghost" data-close>Cancelar</button>' +
+      '<button type="button" class="btn btn--primary" id="entConfirm">Confirmar entregas</button></div>';
+    openModal('Revisar entregas a registrar', body);
+
+    $('#entConfirm').addEventListener('click', function () {
+      var batch = r.filas.filter(function (f) { return f.articuloId && f.cantidad > 0; })
+        .map(function (f) { return { articuloId: f.articuloId, tipo: 'entrega', cantidad: f.cantidad, fecha: f.fecha || S.hoyISO(), nota: nota }; });
+      if (!batch.length) { toast('No hay entregas para registrar', 'warn'); return; }
+      S.addMovimientosBatch(batch);
+      closeModal();
+      toast('Registradas ' + batch.length + ' entregas (' + fmtInt(r.totalCantidad) + ' cajas)', 'ok');
+      render();
     });
   }
 
@@ -938,6 +1017,7 @@
     else if (act === 'guardar-entregas') guardarCarga(false);
     else if (act === 'nuevo-ajuste') openAjuste();
     else if (act === 'importar-ventas') openImportVentas();
+    else if (act === 'importar-entregas') openImportEntregas();
     else if (act === 'demo') cargarDemo();
   });
 
