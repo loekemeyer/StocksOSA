@@ -101,11 +101,19 @@
     state.meta.unidadVista = (v === 'unidades') ? 'unidades' : 'cajas';
     save(); return state.meta.unidadVista;
   }
-  // Unidades por caja de un artículo (id u objeto). 1 si no se conoce.
+  // Unidad por caja más chica que existe de verdad: no hay artículos de "1 u por
+  // caja", el bulto mínimo es de 6. Se usa como piso para los que no tienen dato.
+  var UXC_MIN = 6;
+  // Unidades por caja de un artículo (id u objeto). UXC_MIN si no se conoce.
   function uxcDe(idOrArt) {
     var a = (idOrArt && typeof idOrArt === 'object') ? idOrArt : getArticulo(idOrArt);
     var u = a && a.uxc;
-    return (u && u > 0) ? u : 1;
+    return (u && u > 0) ? u : UXC_MIN;
+  }
+  // ¿El artículo tiene una Uni×Caja real cargada (no la estimada por defecto)?
+  function tieneUxc(idOrArt) {
+    var a = (idOrArt && typeof idOrArt === 'object') ? idOrArt : getArticulo(idOrArt);
+    return !!(a && a.uxc && a.uxc > 0);
   }
   // Convierte una cantidad canónica (UNIDADES) a la unidad de vista activa.
   function enVista(unidades, idOrArt) {
@@ -166,7 +174,10 @@
     if (data.precio !== undefined) a.precio = num(data.precio, 0);
     if (data.stockInicial !== undefined) a.stockInicial = Math.max(0, Math.round(num(data.stockInicial, 0)));
     if (data.totalHistorico !== undefined) a.totalHistorico = Math.max(0, Math.round(num(data.totalHistorico, 0)));
-    if (data.uxc !== undefined) a.uxc = Math.max(1, Math.round(num(data.uxc, 1)));
+    if (data.uxc !== undefined) {
+      var ux = Math.round(num(data.uxc, 0)); // 0/vacío = sin dato (usa el mínimo); si hay valor, piso UXC_MIN
+      a.uxc = ux > 0 ? Math.max(UXC_MIN, ux) : 0;
+    }
     if (data.promedioManual !== undefined) a.promedioManual = optNum(data.promedioManual);
     if (data.mesesPedido !== undefined) a.mesesPedido = optNum(data.mesesPedido);
     if (data.activo !== undefined) a.activo = !!data.activo;
@@ -449,7 +460,7 @@
       if (art) matchCount++; else noEncontrados.push(codRaw);
       if (formato === 'cajas' && uxcFila && uxcFila > 1) uxcDerivado[codRaw] = uxcFila;
 
-      var u = (uxcFila && uxcFila > 1) ? uxcFila : (art ? uxcDe(art) : 1);
+      var u = (uxcFila && uxcFila > 1) ? uxcFila : (art ? uxcDe(art) : UXC_MIN);
       var unidades, cajas;
       if (formato === 'cajas') {                 // viene en cajas -> a unidades (canónico)
         unidades = cantOrig * u;
@@ -726,10 +737,11 @@
     '931E': 12, '932E': 12, '933E': 12, '934E': 12, '935E': 12, '936E': 12,
     '937E': 12, '941E': 12, '942E': 12, '945E': 12, '946E': 12, '948E': 12
   };
-  // uxc del catálogo: exacto, +E y -E (catálogo 946 <-> informe 946E). 1 si no se conoce.
+  // uxc del catálogo: exacto, +E y -E (catálogo 946 <-> informe 946E). 0 si no se
+  // conoce: el artículo queda sin Uni×Caja real y uxcDe aplica el mínimo (UXC_MIN).
   function uxcSeed(code) {
     code = String(code).toUpperCase();
-    return UXC_SEED[code] || UXC_SEED[code + 'E'] || UXC_SEED[code.replace(/E$/, '')] || 1;
+    return UXC_SEED[code] || UXC_SEED[code + 'E'] || UXC_SEED[code.replace(/E$/, '')] || 0;
   }
 
   // Construye el estado inicial con el catálogo real precargado.
@@ -857,7 +869,7 @@
   window.Store = {
     getMeta: getMeta, setMeta: setMeta,
     getUnidadVista: getUnidadVista, setUnidadVista: setUnidadVista,
-    uxcDe: uxcDe, enVista: enVista, actualizarUxcDesde: actualizarUxcDesde,
+    uxcDe: uxcDe, tieneUxc: tieneUxc, enVista: enVista, actualizarUxcDesde: actualizarUxcDesde,
     getArticulos: getArticulos, getArticulo: getArticulo,
     addArticulo: addArticulo, updateArticulo: updateArticulo, removeArticulo: removeArticulo,
     addMovimiento: addMovimiento, addMovimientosBatch: addMovimientosBatch,

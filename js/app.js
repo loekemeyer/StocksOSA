@@ -655,9 +655,9 @@
     var totalCajas = 0, sinUxc = 0;
     var detalle = r.filas.map(function (f) {
       var art = f.articuloId ? S.getArticulo(f.articuloId) : null;
-      var uxc = art ? S.uxcDe(art) : 1;
+      var uxc = art ? S.uxcDe(art) : S.uxcDe(null);
       var cajas = Math.round((f.ventas || 0) / uxc);
-      if (art) { totalCajas += cajas; if (uxc <= 1) sinUxc++; }
+      if (art) { totalCajas += cajas; if (!S.tieneUxc(art)) sinUxc++; }
       return { f: f, art: art, uxc: uxc, cajas: cajas };
     });
 
@@ -687,7 +687,7 @@
       'Suma leída (u): <strong style="color:' + (coincide ? 'var(--ok)' : 'var(--warn)') + '">' + fmtInt(r.totalParseado) + '</strong>' +
       (r.totalInforme != null && !coincide ? ' — no coinciden, revisá' : '') +
       '<br>A descontar del stock: <strong>' + fmtInt(r.totalParseado) + '</strong> unidades (' + fmtInt(totalCajas) + ' cajas)' +
-      (sinUxc ? '<br><span style="color:var(--warn)">' + sinUxc + ' artículo(s) sin Uni×Caja conocida: en cajas se cuentan 1 u = 1 caja.</span>' : '') +
+      (sinUxc ? '<br><span style="color:var(--warn)">' + sinUxc + ' artículo(s) sin Uni×Caja conocida: en cajas se estiman con el mínimo de 6 u por caja.</span>' : '') +
       '</div></div>';
 
     var body = resumen +
