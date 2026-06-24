@@ -6,7 +6,11 @@
   'use strict';
 
   var S = window.Store;
-  var APP_VERSION = '1.2.0';
+  var APP_VERSION = '1.2.1';
+  // Contacto de Loekemeyer para el botón "Enviar a Loekemeyer" (WhatsApp).
+  // Número con código de país, solo dígitos (ej. '5493511234567'). Vacío = abre
+  // WhatsApp para elegir el contacto a mano.
+  var CONTACTO_LOEKE = '';
 
   /* ---------- Estado de UI ---------- */
   var ui = {
@@ -145,7 +149,7 @@
     updateBadge();
     updateBrand();
     var actions = '';
-    if (ui.view === 'stocks') actions = btn('nuevo-art', 'primary', iconPlus(), 'Nuevo artículo') + btn('print-sugerido', 'ghost', iconPrint(), 'Imprimir sugerido');
+    if (ui.view === 'stocks') actions = btn('nuevo-art', 'primary', iconPlus(), 'Nuevo artículo') + btn('enviar-loeke', 'ghost', iconSend(), 'Enviar a Loekemeyer') + btn('print-sugerido', 'ghost', iconPrint(), 'Imprimir sugerido');
     else if (ui.view === 'movimientos') actions = btn('nuevo-ajuste', 'ghost', iconPlus(), 'Ajuste manual');
     else if (ui.view === 'puntopedido') actions = btn('guardar-punto', 'primary', iconSave(), 'Guardar');
     else if (ui.view === 'entregas') actions = btn('importar-entregas', 'primary', iconUpload(), 'Importar Excel');
@@ -188,6 +192,7 @@
   function iconUpload() { return '<svg viewBox="0 0 24 24"><path d="M12 4l5 5-1.4 1.4L13 7.8V16h-2V7.8L8.4 10.4 7 9l5-5zM5 18h14v2H5z"/></svg>'; }
   function iconCalendar() { return '<svg viewBox="0 0 24 24"><path d="M7 2v2H5a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V6a2 2 0 0 0-2-2h-2V2h-2v2H9V2H7zm12 7v10H5V9h14zM7 11v2h2v-2H7zm4 0v2h2v-2h-2zm4 0v2h2v-2h-2z"/></svg>'; }
   function iconCheck() { return '<svg viewBox="0 0 24 24"><path d="M9 16.2 4.8 12l-1.4 1.4L9 19 21 7l-1.4-1.4z"/></svg>'; }
+  function iconSend() { return '<svg viewBox="0 0 24 24"><path d="M2 21l21-9L2 3v7l15 2-15 2v5z"/></svg>'; }
 
   function badgeEstado(e) {
     if (e === 'sin') return '<span class="badge badge--danger"><span class="dot"></span>Sin stock</span>';
@@ -899,31 +904,60 @@
     var totalU = qSum(sug.map(function (x) { return { cajas: x.sugerido, art: x.articulo }; }));
     var rows = sug.map(function (x) {
       var a = x.articulo;
-      return '<tr><td>' + esc(a.codigo || '') + '</td><td>' + esc(a.nombre) + '</td>' +
-        '<td style="text-align:right">' + qf(x.stock, a) + '</td>' +
-        '<td style="text-align:right">' + qf(x.punto, a) + '</td>' +
-        '<td style="text-align:right"><strong>' + qf(x.sugerido, a) + '</strong></td></tr>';
+      return '<tr><td class="cod">' + esc(a.codigo || '') + '</td><td class="art">' + esc(a.nombre) + '</td>' +
+        '<td class="num">' + qf(x.stock, a) + '</td>' +
+        '<td class="num">' + qf(x.punto, a) + '</td>' +
+        '<td class="num"><strong>' + qf(x.sugerido, a) + '</strong></td></tr>';
     }).join('');
     var html = '<!DOCTYPE html><html lang="es"><head><meta charset="utf-8"><title>Pedido sugerido</title>' +
       '<style>body{font-family:Inter,Arial,sans-serif;color:#1c2233;margin:40px;}h1{font-size:22px;margin:0 0 2px;}' +
-      '.muted{color:#6b7390;}table{width:100%;border-collapse:collapse;margin-top:18px;}' +
-      'th,td{padding:9px 10px;border-bottom:1px solid #e3e6f0;font-size:13px;text-align:left;}' +
+      '.muted{color:#6b7390;}' +
+      '.wrap{display:inline-block;max-width:100%;}' +
+      'table{border-collapse:collapse;margin-top:18px;}' +
+      'th,td{padding:9px 14px;border-bottom:1px solid #e3e6f0;font-size:13px;text-align:left;white-space:nowrap;}' +
+      'th:first-child,td:first-child{padding-left:0;}th:last-child,td:last-child{padding-right:0;}' +
       'th{background:#f5f6fb;text-transform:uppercase;font-size:11px;letter-spacing:.04em;color:#6b7390;}' +
+      '.cod{color:#6b7390;}.num{text-align:right;}.art{white-space:normal;}' +
       '.head{display:flex;justify-content:space-between;align-items:flex-start;border-bottom:2px solid #4f46e5;padding-bottom:14px;}' +
       '.tot{margin-top:14px;text-align:right;font-size:15px;font-weight:700;}.brand{font-size:13px;color:#4f46e5;font-weight:700;}</style></head><body>' +
       '<div class="head"><div><div class="brand">PEDIDO SUGERIDO</div><h1>' + esc(meta.empresa || 'Mi Empresa') + '</h1>' +
       (meta.cliente ? '<div class="muted">Cliente: ' + esc(meta.cliente) + '</div>' : '') + '</div>' +
       '<div class="muted" style="text-align:right">Fecha: ' + fmtFecha(S.hoyISO()) + '</div></div>' +
-      '<table><thead><tr><th>Código</th><th>Artículo</th><th style="text-align:right">Stock hoy</th>' +
-      '<th style="text-align:right">Máximo</th><th style="text-align:right">A pedir</th></tr></thead>' +
+      '<div class="wrap"><table><thead><tr><th class="cod">Código</th><th class="art">Artículo</th><th class="num">Stock hoy</th>' +
+      '<th class="num">Máximo</th><th class="num">A pedir</th></tr></thead>' +
       '<tbody>' + rows + '</tbody></table>' +
-      '<div class="tot">Total ' + unidadLbl() + ' a pedir: ' + fmtInt(totalU) + '</div>' +
+      '<div class="tot">Total ' + unidadLbl() + ' a pedir: ' + fmtInt(totalU) + '</div></div>' +
       '<p class="muted" style="margin-top:40px;font-size:12px;">Generado con StockRotativo · ' + fmtFecha(S.hoyISO()) + '</p>' +
       '</body></html>';
     var w = window.open('', '_blank');
     if (!w) { toast('Permití las ventanas emergentes para imprimir', 'warn'); return; }
     w.document.write(html); w.document.close();
     setTimeout(function () { w.focus(); w.print(); }, 350);
+  }
+
+  /* ---------- Enviar pedido a Loekemeyer (WhatsApp) ----------
+     El pedido a proveedor va SIEMPRE en cajas cerradas (no importa el toggle). */
+  function textoPedido() {
+    var sug = S.pedidoSugerido();
+    var meta = S.getMeta();
+    var totalCajas = 0;
+    var lineas = sug.map(function (x) {
+      var a = x.articulo;
+      var cajas = Math.round(x.sugerido / S.uxcDe(a)); // sugerido ya es múltiplo de la caja
+      totalCajas += cajas;
+      return '• ' + (a.codigo ? a.codigo + ' ' : '') + a.nombre + ': ' + fmtInt(cajas) + (cajas === 1 ? ' caja' : ' cajas');
+    });
+    return 'PEDIDO SUGERIDO — ' + (meta.empresa || 'Loekemeyer') + '\n' +
+      (meta.cliente ? 'Cliente: ' + meta.cliente + '\n' : '') +
+      'Fecha: ' + fmtFecha(S.hoyISO()) + '\n\n' +
+      lineas.join('\n') + '\n\nTotal: ' + fmtInt(totalCajas) + (totalCajas === 1 ? ' caja' : ' cajas');
+  }
+  function enviarLoeke() {
+    if (!S.pedidoSugerido().length) { toast('No hay nada para reponer', 'info'); return; }
+    var url = 'https://wa.me/' + CONTACTO_LOEKE + '?text=' + encodeURIComponent(textoPedido());
+    var w = window.open(url, '_blank');
+    if (!w) { toast('Permití las ventanas emergentes para enviar', 'warn'); return; }
+    toast('Abriendo WhatsApp con el pedido', 'ok');
   }
 
   /* ============================================================
@@ -1056,6 +1090,7 @@
     var act = t.getAttribute('data-action');
     if (act === 'nuevo-art') openArticulo(null);
     else if (act === 'print-sugerido') imprimirSugerido();
+    else if (act === 'enviar-loeke') enviarLoeke();
     else if (act === 'guardar-punto') guardarPunto();
     else if (act === 'nuevo-ajuste') openAjuste();
     else if (act === 'importar-ventas') openImportVentas(t.getAttribute('data-quincena') || null);

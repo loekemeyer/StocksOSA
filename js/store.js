@@ -287,9 +287,15 @@
   function puntoPedido(a) {
     return (a.stockMaximo != null) ? Math.max(0, Math.round(a.stockMaximo)) : 0;
   }
+  // Pedido sugerido en UNIDADES, redondeado SIEMPRE a cajas cerradas: se compra
+  // en cajas enteras, de modo que (cajas a pedir) × (Uni×Caja) = (unidades a pedir).
+  // cajas a pedir = ceil(faltante / Uni×Caja); unidades = cajas × Uni×Caja.
   function sugerido(a, stock) {
     if (stock === undefined) stock = stockActual(a.id);
-    return Math.max(0, puntoPedido(a) - stock);
+    var faltante = puntoPedido(a) - stock;
+    if (faltante <= 0) return 0;
+    var f = uxcDe(a);
+    return Math.ceil(faltante / f) * f;
   }
   function necesitaPedido(a, stock) {
     return sugerido(a, stock) > 0;
