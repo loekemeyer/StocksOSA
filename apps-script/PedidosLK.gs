@@ -10,13 +10,20 @@
  *   G Uni Pedidas · H Sucursal de Entrega · I Condición de Pago
  *
  * --------------------------- CÓMO DEPLOYARLO ---------------------------
- * 1) Abrí el Sheet "Pedidos Web" → Extensiones → Apps Script.
- * 2) Pegá este archivo (reemplazá el contenido) y guardá.
- * 3) Implementar → Nueva implementación → tipo "Aplicación web".
+ * IMPORTANTE: NO lo pegues en el Apps Script del propio Sheet (eso pisaría la
+ * automatización actual de la planilla). Creá un proyecto SEPARADO. Este script
+ * abre el Sheet por ID, así que funciona standalone y NO toca nada de lo existente:
+ * lo único que hace es AGREGAR filas al final de la pestaña "Pedidos LK"
+ * (nunca borra ni edita filas ni otras pestañas).
+ *
+ * 1) Andá a https://script.google.com  ->  Nuevo proyecto (standalone).
+ * 2) Pegá este archivo y guardá.
+ * 3) Implementar -> Nueva implementación -> tipo "Aplicación web".
  *      - Ejecutar como: Yo (tu cuenta)
  *      - Quién tiene acceso: Cualquier usuario   (o "Cualquiera con el vínculo")
+ *      - Autorizá los permisos que pida.
  * 4) Copiá la URL que termina en /exec.
- * 5) Pegala en StockRotativo → Configuración → "Integración Loekemeyer".
+ * 5) Pegala en StockRotativo -> Configuración -> "Integración Loekemeyer".
  * -----------------------------------------------------------------------
  */
 
