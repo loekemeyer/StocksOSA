@@ -6,11 +6,18 @@
   'use strict';
 
   var S = window.Store;
-  var APP_VERSION = '1.2.1';
-  // Contacto de Loekemeyer para el botón "Enviar a Loekemeyer" (WhatsApp).
-  // Número con código de país, solo dígitos (ej. '5493511234567'). Vacío = abre
-  // WhatsApp para elegir el contacto a mano.
-  var CONTACTO_LOEKE = '';
+  var APP_VERSION = '1.3.0';
+  // ----- Integración Loekemeyer (envío del pedido sugerido) -----
+  var SUPABASE_URL = 'https://kwkclwhmoygunqmlegrg.supabase.co';
+  var SUPABASE_KEY = 'sb_publishable_mVX5MnjwM770cNjgiL6yLw_LDNl9pML'; // publishable: segura para el front
+  var LK_CLIENTE = 2533;   // código de OSA en el sistema de Loekemeyer (col C)
+  var LK_VEND = 7;         // vendedor (col D)
+  var LK_COND_PAGO = 18;   // condición de pago (col I)
+  var LK_SUCURSALES = [
+    'Puente del Inca 2450 - Ezeiza',
+    'Zuviria 5352- Villa Lugano',
+    'Retira'
+  ];
 
   /* ---------- Estado de UI ---------- */
   var ui = {
@@ -935,29 +942,74 @@
     setTimeout(function () { w.focus(); w.print(); }, 350);
   }
 
-  /* ---------- Enviar pedido a Loekemeyer (WhatsApp) ----------
-     El pedido a proveedor va SIEMPRE en cajas cerradas (no importa el toggle). */
-  function textoPedido() {
+  /* ---------- Enviar pedido a Loekemeyer (Google Sheet + Supabase) ----------
+     El pedido a proveedor va SIEMPRE en cajas cerradas. Una línea por artículo
+     (cod, cajas, unidades) con cabecera fija de OSA. Se manda a:
+       1) el Apps Script del Sheet "Pedidos LK" (asigna N° Pedido = máx+1)
+       2) la tabla aislada osa_reposicion en Supabase (copia/histórico). */
+  function buildPedidoLK() {
     var sug = S.pedidoSugerido();
-    var meta = S.getMeta();
-    var totalCajas = 0;
-    var lineas = sug.map(function (x) {
-      var a = x.articulo;
-      var cajas = Math.round(x.sugerido / S.uxcDe(a)); // sugerido ya es múltiplo de la caja
-      totalCajas += cajas;
-      return '• ' + (a.codigo ? a.codigo + ' ' : '') + a.nombre + ': ' + fmtInt(cajas) + (cajas === 1 ? ' caja' : ' cajas');
-    });
-    return 'PEDIDO SUGERIDO — ' + (meta.empresa || 'Loekemeyer') + '\n' +
-      (meta.cliente ? 'Cliente: ' + meta.cliente + '\n' : '') +
-      'Fecha: ' + fmtFecha(S.hoyISO()) + '\n\n' +
-      lineas.join('\n') + '\n\nTotal: ' + fmtInt(totalCajas) + (totalCajas === 1 ? ' caja' : ' cajas');
+    var m = S.getMeta();
+    var items = sug.map(function (x) {
+      var a = x.articulo, f = S.uxcDe(a);
+      var cajas = Math.round(x.sugerido / f); // sugerido ya es múltiplo de la caja
+      return { cod: a.codigo || '', nombre: a.nombre, cajas: cajas, unidades: cajas * f };
+    }).filter(function (it) { return it.cajas > 0; });
+    var totalCajas = items.reduce(function (s, it) { return s + it.cajas; }, 0);
+    var totalUni = items.reduce(function (s, it) { return s + it.unidades; }, 0);
+    var iso = S.hoyISO().split('-'); // yyyy-mm-dd -> dd/MM/yyyy (formato del Sheet)
+    return {
+      fecha: iso[2] + '/' + iso[1] + '/' + iso[0],
+      cliente: LK_CLIENTE, vend: LK_VEND, condicionPago: LK_COND_PAGO,
+      sucursal: m.sucursalLK || LK_SUCURSALES[0],
+      items: items, totalCajas: totalCajas, totalUnidades: totalUni
+    };
   }
+
   function enviarLoeke() {
-    if (!S.pedidoSugerido().length) { toast('No hay nada para reponer', 'info'); return; }
-    var url = 'https://wa.me/' + CONTACTO_LOEKE + '?text=' + encodeURIComponent(textoPedido());
-    var w = window.open(url, '_blank');
-    if (!w) { toast('Permití las ventanas emergentes para enviar', 'warn'); return; }
-    toast('Abriendo WhatsApp con el pedido', 'ok');
+    var pedido = buildPedidoLK();
+    if (!pedido.items.length) { toast('No hay nada para reponer', 'info'); return; }
+    var m = S.getMeta();
+    if (!m.appsScriptUrl) {
+      toast('Falta la URL del Apps Script (Configuración → Integración Loekemeyer)', 'warn');
+      setView('config'); return;
+    }
+    toast('Enviando pedido a Loekemeyer…', 'info');
+    // 1) Apps Script -> Sheet "Pedidos LK" (Content-Type text/plain = sin preflight CORS)
+    fetch(m.appsScriptUrl, {
+      method: 'POST',
+      headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+      body: JSON.stringify(pedido)
+    })
+      .then(function (r) { return r.json(); })
+      .then(function (res) {
+        if (!res || !res.ok) throw new Error(res && res.error ? res.error : 'respuesta inválida del Sheet');
+        guardarEnSupabase(pedido, res.numeroPedido); // best-effort, no bloquea
+        toast('Pedido N° ' + res.numeroPedido + ' enviado (' + pedido.items.length + ' artículos)', 'ok');
+      })
+      .catch(function (err) {
+        toast('No se pudo enviar al Sheet: ' + err.message, 'warn');
+      });
+  }
+
+  // Copia del pedido en Supabase (tabla aislada osa_reposicion). Best-effort.
+  function guardarEnSupabase(pedido, numeroPedido) {
+    fetch(SUPABASE_URL + '/rest/v1/osa_reposicion', {
+      method: 'POST',
+      headers: {
+        'apikey': SUPABASE_KEY,
+        'Authorization': 'Bearer ' + SUPABASE_KEY,
+        'Content-Type': 'application/json',
+        'Prefer': 'return=minimal'
+      },
+      body: JSON.stringify({
+        numero_pedido: (numeroPedido != null ? numeroPedido : null),
+        cliente: pedido.cliente, vend: pedido.vend, sucursal: pedido.sucursal,
+        condicion_pago: pedido.condicionPago,
+        total_cajas: pedido.totalCajas, total_unidades: pedido.totalUnidades,
+        items: pedido.items
+      })
+    }).catch(function () { /* la copia en Supabase es best-effort */ });
   }
 
   /* ============================================================
@@ -994,6 +1046,17 @@
       '</div></div></div>';
     html += '</div>';
 
+    html += '<div class="card" style="margin-top:18px;"><div class="card__head"><h2>Integración Loekemeyer (envío del pedido)</h2></div><div class="card__body">' +
+      '<form class="form" id="lkForm">' +
+      field('URL del Apps Script (Web App …/exec)', '<input class="input" id="cAppsScript" value="' + esc(m.appsScriptUrl || '') + '" placeholder="https://script.google.com/macros/s/AKfy…/exec">') +
+      field('Sucursal de entrega (default)', '<select class="select" id="cSucursal">' +
+        LK_SUCURSALES.map(function (s) {
+          return '<option value="' + esc(s) + '"' + ((m.sucursalLK || LK_SUCURSALES[0]) === s ? ' selected' : '') + '>' + esc(s) + '</option>';
+        }).join('') + '</select>') +
+      '<div class="hint">El botón <strong>«Enviar a Loekemeyer»</strong> (en Stocks) manda el pedido sugerido a la planilla «Pedidos LK» —el N° de pedido se asigna solo— y guarda una copia en Supabase. Pegá acá la URL del Apps Script una vez deployado.</div>' +
+      '<div class="form-actions"><button type="submit" class="btn btn--primary">Guardar integración</button></div>' +
+      '</form></div></div>';
+
     html += '<div class="card" style="margin-top:18px;"><div class="card__head"><h2>¿Cómo funciona?</h2></div><div class="card__body">' +
       '<ol style="margin:0;padding-left:20px;line-height:1.9;color:var(--muted);">' +
       '<li><strong style="color:var(--text)">Stocks</strong>: ves el stock de hoy, el máximo y el pedido sugerido de cada artículo.</li>' +
@@ -1011,6 +1074,12 @@
       var meses = Math.max(1, Math.round(parseFloat($('#cPeriodo').value) || 17));
       S.setMeta({ empresa: $('#cEmpresa').value, cliente: $('#cCliente').value, moneda: $('#cMoneda').value, periodoMeses: meses });
       toast('Configuración guardada', 'ok'); updateBrand(); render();
+    });
+    var lkForm = $('#lkForm');
+    if (lkForm) lkForm.addEventListener('submit', function (e) {
+      e.preventDefault();
+      S.setMeta({ appsScriptUrl: ($('#cAppsScript').value || '').trim(), sucursalLK: $('#cSucursal').value });
+      toast('Integración Loekemeyer guardada', 'ok');
     });
     bindAction('export', exportar);
     bindAction('import', function () { $('#importFile').click(); });
