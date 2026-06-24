@@ -1,9 +1,9 @@
 /**
  * StockRotativo (OSA)  ->  Google Sheet "Pedidos Web", pestaña "Pedidos LK".
  *
- * Recibe por POST el pedido de reposición de OSA y agrega UNA FILA POR ARTÍCULO,
- * asignando automáticamente el N° Pedido = (máximo N° Pedido de la planilla) + 1
- * (con LockService para que nunca se pise con otro envío).
+ * Recibe por POST el pedido de reposición de OSA y agrega UNA FILA POR ARTÍCULO.
+ * El N° Pedido lo manda la app (contador COMPARTIDO con la web: orders_id_seq, así
+ * nunca colisiona). Si no viniera, se cae a máx+1 sobre la planilla (con LockService).
  *
  * Columnas que escribe (A..I); J..P quedan vacías:
  *   A Fecha · B N° Pedido · C Cliente · D Vend · E Cod Art · F Cajas ·
@@ -47,7 +47,9 @@ function doPost(e) {
     var items = pedido.items || [];
     if (!items.length) throw new Error('Pedido sin artículos');
 
-    var numero = siguienteNumero(ss);
+    // N° de pedido: si la app lo manda (contador compartido con la web), se usa ese;
+    // si no viniera, se cae a máx+1 sobre la planilla.
+    var numero = (pedido.numero != null && pedido.numero !== '') ? pedido.numero : siguienteNumero(ss);
     var fecha = pedido.fecha ||
       Utilities.formatDate(new Date(), ss.getSpreadsheetTimeZone(), 'dd/MM/yyyy');
 
