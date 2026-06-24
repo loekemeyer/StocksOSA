@@ -305,7 +305,19 @@ svg { display: block; }
 .dot { width: 7px; height: 7px; border-radius: 50%; background: currentColor; }
 
 /* ---------- Tablas ---------- */
-.table-wrap { overflow-x: auto; }
+.table-wrap { overflow: visible; }
+@media (max-width: 720px) { .table-wrap { overflow-x: auto; } } /* mobile: scroll horizontal (cede el header fijo) */
+
+/* Header de tabla fijo al scrollear, pegado bajo el topbar (alto medido en --topbar-h). En modales no aplica. */
+.view .table thead th { position: sticky; top: var(--topbar-h, 78px); z-index: 5; box-shadow: 0 1px 0 var(--line); }
+
+/* Selector de sucursal de entrega (pantalla Stocks) */
+.sucbar { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; margin-bottom: 18px; padding: 12px 15px; background: var(--surface); border: 1px solid var(--line); border-radius: 14px; box-shadow: var(--shadow-sm); }
+.sucbar__lbl { font-size: 12px; text-transform: uppercase; letter-spacing: .04em; color: var(--muted); font-weight: 700; }
+.sucbar__btns { display: flex; gap: 8px; flex-wrap: wrap; }
+.sucbtn { padding: 9px 16px; border-radius: 10px; border: 1.5px solid var(--line-strong); background: var(--surface-2); color: var(--text); font: inherit; font-weight: 600; font-size: 13.5px; cursor: pointer; transition: background .15s, border-color .15s, color .15s; }
+.sucbtn:hover { border-color: var(--primary); color: var(--primary); }
+.sucbtn.is-active { background: var(--primary); border-color: var(--primary); color: #fff; box-shadow: 0 4px 12px rgba(79,70,229,.30); }
 .ranking { max-width: 680px; }
 .table { width: 100%; border-collapse: collapse; font-size: 14px; }
 .table th, .table td { padding: 13px 14px; text-align: left; border-bottom: 1px solid var(--line); vertical-align: middle; }

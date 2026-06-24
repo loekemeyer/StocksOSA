@@ -40,7 +40,7 @@
         mesesPedidoDefault: 2,  // meses de cobertura deseados por defecto (punto de pedido = promedio x meses)
         unidadVista: 'cajas',   // unidad para MOSTRAR cantidades: 'cajas' | 'unidades' (solo display)
         appsScriptUrl: '',      // URL .../exec del Apps Script que escribe en el Sheet "Pedidos LK"
-        sucursalLK: 'Puente del Inca 2450 - Ezeiza', // sucursal de entrega default del pedido a Loekemeyer
+        sucursalLK: 'Zuviria 5352- Villa Lugano', // sucursal de entrega default del pedido a Loekemeyer
         creado: Date.now()
       },
       // Artículo: promedioManual y mesesPedido son overrides opcionales (null = usar el automático/global).

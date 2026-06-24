@@ -29,8 +29,10 @@
 
 var SPREADSHEET_ID = '1YLjfYjuq2l5FN0xXZ1b_1aCOQ8mFAS7hLeYpFtzcW6s';
 var TAB_DESTINO = 'Pedidos LK';
-// Pestañas de donde se calcula el máximo N° Pedido (para que máx+1 no choque).
-var TABS_NUMERACION = ['Pedidos LK', 'Definidos'];
+// Pestañas de donde se calcula el máximo N° Pedido (para que máx+1 no choque con
+// NINGUNA via: la web escribe en "Pedidos CH", OSA en "Pedidos LK", y "Definidos"
+// es el consolidado. Se recalcula en cada envio -> el numero se autocorrige.
+var TABS_NUMERACION = ['Pedidos LK', 'Pedidos CH', 'Definidos'];
 var COL_NUMERO = 2; // columna B = N° Pedido
 
 function doPost(e) {
@@ -50,8 +52,9 @@ function doPost(e) {
       Utilities.formatDate(new Date(), ss.getSpreadsheetTimeZone(), 'dd/MM/yyyy');
 
     var filas = items.map(function (it) {
-      // A          B       C               D            E        F         G             H                 I                    J..P
-      return [fecha, numero, pedido.cliente, pedido.vend, it.cod, it.cajas, it.unidades, pedido.sucursal, pedido.condicionPago, '', '', '', '', '', '', ''];
+      var codArt = "'" + String(it.cod || '').trim(); // apostrofe = forzar texto (igual que la via web)
+      // A          B       C               D            E       F         G             H                 I                    J..P
+      return [fecha, numero, pedido.cliente, pedido.vend, codArt, it.cajas, it.unidades, pedido.sucursal, pedido.condicionPago, '', '', '', '', '', '', ''];
     });
 
     hoja.getRange(hoja.getLastRow() + 1, 1, filas.length, filas[0].length).setValues(filas);

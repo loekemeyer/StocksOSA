@@ -6,7 +6,7 @@
   'use strict';
 
   var S = window.Store;
-  var APP_VERSION = '1.3.0';
+  var APP_VERSION = '1.3.1';
   // ----- Integración Loekemeyer (envío del pedido sugerido) -----
   var SUPABASE_URL = 'https://kwkclwhmoygunqmlegrg.supabase.co';
   var SUPABASE_KEY = 'sb_publishable_mVX5MnjwM770cNjgiL6yLw_LDNl9pML'; // publishable: segura para el front
@@ -14,9 +14,9 @@
   var LK_VEND = 7;         // vendedor (col D)
   var LK_COND_PAGO = 18;   // condición de pago (col I)
   var LK_SUCURSALES = [
-    'Puente del Inca 2450 - Ezeiza',
-    'Zuviria 5352- Villa Lugano',
-    'Retira'
+    { val: 'Zuviria 5352- Villa Lugano', lbl: 'Villa Lugano' }, // default
+    { val: 'Puente del Inca 2450 - Ezeiza', lbl: 'Ezeiza' },
+    { val: 'Retira', lbl: 'Retira' }
   ];
 
   /* ---------- Estado de UI ---------- */
@@ -150,6 +150,11 @@
     b.hidden = n === 0;
   }
   function updateBrand() { $('#brandEmpresa').textContent = S.getMeta().empresa || 'Mi Empresa'; }
+  // Mide el alto real del topbar y lo expone como --topbar-h (para fijar el header de tabla justo debajo).
+  function medirTopbar() {
+    var tb = document.querySelector('.topbar');
+    if (tb) document.documentElement.style.setProperty('--topbar-h', tb.offsetHeight + 'px');
+  }
 
   /* ---------- Render principal ---------- */
   function render() {
@@ -164,6 +169,7 @@
     else if (ui.view === 'cargas') actions = btn('importar-ventas', 'primary', iconUpload(), 'Importar informe');
     $('#topbarActions').innerHTML = actions;
     renderUnitToggle();
+    medirTopbar();
 
     var fn = ({
       stocks: renderStocks, movimientos: renderMovimientos, puntopedido: renderPunto,
@@ -240,8 +246,14 @@
     });
     var totalPedir = qSum(sug.map(function (x) { return { cajas: x.sugerido, art: x.articulo }; }));
     var uCap = unidadVista() === 'unidades' ? 'Unidades' : 'Cajas';
+    var sucActual = S.getMeta().sucursalLK || LK_SUCURSALES[0].val;
 
-    var html = '<div class="stats">';
+    var html = '<div class="sucbar"><span class="sucbar__lbl">Sucursal de entrega</span><div class="sucbar__btns">' +
+      LK_SUCURSALES.map(function (s) {
+        return '<button type="button" class="sucbtn' + (sucActual === s.val ? ' is-active' : '') +
+          '" data-action="set-sucursal" data-suc="' + esc(s.val) + '">' + esc(s.lbl) + '</button>';
+      }).join('') + '</div></div>';
+    html += '<div class="stats">';
     html += stat('primary', iconBox(), 'Artículos', fmtInt(arts.length), 'activos');
     html += stat('ok', iconLayers(), uCap + ' en stock', fmtInt(totalStock), valor > 0 ? fmtMoney(valor) : 'en el cliente');
     html += stat(sug.length ? 'warn' : 'ok', iconBell(), 'Para reponer', fmtInt(sug.length), sug.length ? 'artículos' : 'todo en nivel');
@@ -961,7 +973,7 @@
     return {
       fecha: iso[2] + '/' + iso[1] + '/' + iso[0],
       cliente: LK_CLIENTE, vend: LK_VEND, condicionPago: LK_COND_PAGO,
-      sucursal: m.sucursalLK || LK_SUCURSALES[0],
+      sucursal: m.sucursalLK || LK_SUCURSALES[0].val,
       items: items, totalCajas: totalCajas, totalUnidades: totalUni
     };
   }
@@ -1049,11 +1061,7 @@
     html += '<div class="card" style="margin-top:18px;"><div class="card__head"><h2>Integración Loekemeyer (envío del pedido)</h2></div><div class="card__body">' +
       '<form class="form" id="lkForm">' +
       field('URL del Apps Script (Web App …/exec)', '<input class="input" id="cAppsScript" value="' + esc(m.appsScriptUrl || '') + '" placeholder="https://script.google.com/macros/s/AKfy…/exec">') +
-      field('Sucursal de entrega (default)', '<select class="select" id="cSucursal">' +
-        LK_SUCURSALES.map(function (s) {
-          return '<option value="' + esc(s) + '"' + ((m.sucursalLK || LK_SUCURSALES[0]) === s ? ' selected' : '') + '>' + esc(s) + '</option>';
-        }).join('') + '</select>') +
-      '<div class="hint">El botón <strong>«Enviar a Loekemeyer»</strong> (en Stocks) manda el pedido sugerido a la planilla «Pedidos LK» —el N° de pedido se asigna solo— y guarda una copia en Supabase. Pegá acá la URL del Apps Script una vez deployado.</div>' +
+      '<div class="hint">El botón <strong>«Enviar a Loekemeyer»</strong> (en Stocks) manda el pedido sugerido a la planilla «Pedidos LK» —el N° de pedido se asigna solo— y guarda una copia en Supabase. La <strong>sucursal de entrega</strong> se elige arriba, en la pantalla de Stocks. Pegá acá la URL del Apps Script una vez deployado.</div>' +
       '<div class="form-actions"><button type="submit" class="btn btn--primary">Guardar integración</button></div>' +
       '</form></div></div>';
 
@@ -1078,7 +1086,7 @@
     var lkForm = $('#lkForm');
     if (lkForm) lkForm.addEventListener('submit', function (e) {
       e.preventDefault();
-      S.setMeta({ appsScriptUrl: ($('#cAppsScript').value || '').trim(), sucursalLK: $('#cSucursal').value });
+      S.setMeta({ appsScriptUrl: ($('#cAppsScript').value || '').trim() });
       toast('Integración Loekemeyer guardada', 'ok');
     });
     bindAction('export', exportar);
@@ -1169,6 +1177,7 @@
       S.setUnidadVista(unidadVista() === 'unidades' ? 'cajas' : 'unidades');
       render();
     }
+    else if (act === 'set-sucursal') { S.setMeta({ sucursalLK: t.getAttribute('data-suc') }); render(); }
     else if (act === 'demo') cargarDemo();
   });
 
@@ -1176,6 +1185,7 @@
   function init() {
     var vEl = $('#appVersion');
     if (vEl) vEl.textContent = 'v' + APP_VERSION;
+    window.addEventListener('resize', medirTopbar);
     // Aviso si falla un guardado (p. ej. localStorage lleno). Con throttle para
     // no apilar toasts si fallan varios guardados seguidos.
     var ultErr = 0;
