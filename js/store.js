@@ -10,11 +10,15 @@
   // fusiona (merge) en los navegadores existentes: actualiza nombres, totales y
   // máximos y agrega artículos nuevos, SIN borrar movimientos, pedidos ni el
   // stock real ya cargado (ver mergeSeed).
-  var SEED_VERSION = 11;
+  var SEED_VERSION = 12;
   // Versión del "stock inicial" precargado (columna Existencia). Al subirla, el
   // stock inicial real se reaplica una vez aunque ya haya movimientos (corrección
   // de baseline). Después vuelve a protegerse. Ver mergeSeed.
   var STOCK_BASELINE = 1;
+  // Versión de la Uni×Caja autoritativa (sheet "Cotizador Loekemeyer"). Al subirla,
+  // la Uni×Caja del seed se reaplica una vez a todos los artículos (corrige valores
+  // viejos), y después se respeta la que cargue un import. Ver mergeSeed.
+  var UXC_BASELINE = 1;
   // Artículos duplicados (mismo producto con código base y +E) que deben quedar
   // como uno solo: [idDuplicado, idCanónico]. Al fusionar se mueven los
   // movimientos y se suma el stock inicial al canónico. Ver mergeSeed.
@@ -38,7 +42,8 @@
         creado: Date.now()
       },
       // Artículo: promedioManual y mesesPedido son overrides opcionales (null = usar el automático/global).
-      articulos: [], // {id,codigo,nombre,descripcion,foto,precio,stockInicial,totalHistorico,promedioManual,mesesPedido,activo}
+      // stockMaximo (unidades) = nivel objetivo; pedido sugerido = stockMaximo − stock. null = sin máximo (no repone).
+      articulos: [], // {id,codigo,nombre,descripcion,foto,precio,stockInicial,totalHistorico,uxc,stockMaximo,promedioManual,mesesPedido,activo}
       movimientos: [], // {id,articuloId,tipo,cantidad,fecha,nota}
       pedidos: [] // {id,fecha,estado,nota,items:[{articuloId,codigo,nombre,cantidad}]}
     };
@@ -150,6 +155,8 @@
       precio: num(data.precio, 0),
       stockInicial: Math.max(0, Math.round(num(data.stockInicial, 0))),
       totalHistorico: Math.max(0, Math.round(num(data.totalHistorico, 0))),
+      uxc: Math.max(1, Math.round(num(data.uxc, 1))),
+      stockMaximo: optNum(data.stockMaximo),        // nivel objetivo (unidades); null = sin máximo
       promedioManual: optNum(data.promedioManual), // override del promedio mensual (null = automático)
       mesesPedido: optNum(data.mesesPedido),        // override de meses de cobertura (null = global)
       activo: data.activo !== false
@@ -169,6 +176,7 @@
     if (data.stockInicial !== undefined) a.stockInicial = Math.max(0, Math.round(num(data.stockInicial, 0)));
     if (data.totalHistorico !== undefined) a.totalHistorico = Math.max(0, Math.round(num(data.totalHistorico, 0)));
     if (data.uxc !== undefined) a.uxc = Math.max(1, Math.round(num(data.uxc, 1)));
+    if (data.stockMaximo !== undefined) a.stockMaximo = optNum(data.stockMaximo);
     if (data.promedioManual !== undefined) a.promedioManual = optNum(data.promedioManual);
     if (data.mesesPedido !== undefined) a.mesesPedido = optNum(data.mesesPedido);
     if (data.activo !== undefined) a.activo = !!data.activo;
@@ -259,10 +267,11 @@
     return t;
   }
   /* ---------- Punto de pedido y reposición (Módulos 1 y 3) ----------
-     Punto de pedido = promedio de ventas mensual x meses de cobertura deseados.
-     · Promedio: automático (totalHistorico / periodoMeses) salvo override manual.
-     · Meses:    global (meta.mesesPedidoDefault) salvo override por artículo.
-     Pedido sugerido = punto de pedido − stock hoy (cuando da positivo). */
+     Punto de pedido = stockMaximo: el nivel objetivo (en unidades) que OSA quiere
+     tener de cada artículo. Pedido sugerido = punto de pedido − stock hoy (top-up,
+     cuando da positivo). Sin máximo => no se repone.
+     El promedio mensual (totalHistorico / periodoMeses) se conserva solo como
+     referencia de consumo; ya no determina el punto de pedido. */
   function promedioMensualAuto(a) {
     return (a.totalHistorico || 0) / Math.max(1, state.meta.periodoMeses || 1);
   }
@@ -272,8 +281,11 @@
   function mesesPedido(a) {
     return (a.mesesPedido != null) ? a.mesesPedido : (state.meta.mesesPedidoDefault || 0);
   }
+  // Punto de pedido = nivel objetivo de stock (stockMaximo, en unidades). Si el
+  // artículo no tiene máximo definido, no se repone (0). El pedido sugerido hace
+  // top-up hasta este nivel: sugerido = max(0, puntoPedido − stock).
   function puntoPedido(a) {
-    return Math.round(promedioMensual(a) * mesesPedido(a));
+    return (a.stockMaximo != null) ? Math.max(0, Math.round(a.stockMaximo)) : 0;
   }
   function sugerido(a, stock) {
     if (stock === undefined) stock = stockActual(a.id);
@@ -695,7 +707,10 @@
     // Sin historial de ventas (no figuran en el ranking), pero OSA tiene stock
     // de ellos en el informe de Existencias: se agregan con total 0.
     ['517', 'Pinza gastronómica de acero', 0],
-    ['946', 'Cuchara calada acero inoxidable', 0]
+    ['946', 'Cuchara calada acero inoxidable', 0],
+    // Productos nuevos del Cotizador Loekemeyer (con máximo objetivo, sin historial).
+    ['816E', 'Pelador V mango ergonómico', 0],
+    ['584E', 'Aceitera 400 ml', 0]
   ];
 
   // Stock inicial real del cliente (OSA) · informe "Existencias" del 23/06/26,
@@ -728,19 +743,38 @@
     '564': 12, '566E': 6, '575': 12, '577': 12, '579': 12, '580E': 12, '583E': 15,
     '931E': 12, '932E': 12, '933E': 12, '934E': 12, '935E': 12, '936E': 12,
     '937E': 12, '941E': 12, '942E': 12, '945E': 12, '946E': 12, '948E': 12,
-    // Completadas a 12 u/caja (estándar del cliente) las que no tenían Uni×Caja.
-    '512': 12, '587': 12, '057': 12, '560': 12, '589E': 12, '598E': 12, '511': 12,
-    '811E': 12, '538E': 12, '361E': 12, '478E': 12, '570': 12, '561': 12, '596': 12,
+    // Uni×Caja según el Cotizador de Loekemeyer (las que faltaban; casi todas 12,
+    // salvo 589E/325/570 = 24, corregidas con la fuente autoritativa).
+    '512': 12, '587': 12, '057': 12, '560': 12, '589E': 24, '598E': 12, '511': 12,
+    '811E': 12, '538E': 12, '361E': 12, '478E': 12, '570': 24, '561': 12, '596': 12,
     '229': 12, '581': 12, '540E': 12, '539E': 12, '536E': 12, '222': 12, '595': 12,
-    '325': 12, '522E': 12, '943E': 12, '574E': 12, '585E': 12, '809E': 12, '569': 12,
+    '325': 24, '522E': 12, '943E': 12, '574E': 12, '585E': 12, '809E': 12, '569': 12,
     '554': 12, '563': 12, '586': 12, '591': 12, '944E': 12, '817E': 12, '364E': 12,
-    '328E': 12, '360E': 12, '594': 12, '524': 12, '517': 12
+    '328E': 12, '360E': 12, '594': 12, '524': 12, '517': 12,
+    // Productos nuevos del Cotizador (con máximo, sin historial).
+    '816E': 12, '584E': 6
   };
   // uxc del catálogo: exacto, +E y -E (catálogo 946 <-> informe 946E). 1 si no se conoce.
   function uxcSeed(code) {
     code = String(code).toUpperCase();
     return UXC_SEED[code] || UXC_SEED[code + 'E'] || UXC_SEED[code.replace(/E$/, '')] || 1;
   }
+
+  // Stock máximo objetivo por artículo, EN CAJAS (sheet "Cotizador Loekemeyer",
+  // columna "Pedido en Cajas"). En el seed se convierte a unidades (× Uni×Caja).
+  // Lo que no figura acá no tiene máximo => no se repone.
+  var MAX_CAJAS = {
+    '246': 1, '280': 10, '315': 15, '355': 5, '395': 10, '501': 20, '502': 20, '504': 30,
+    '505': 100, '506': 50, '507': 5, '508': 20, '510': 10, '511': 5, '512': 20, '513': 50,
+    '515': 10, '518': 10, '519': 10, '520': 10, '521': 10, '523': 15, '530': 10, '531': 10,
+    '542': 10, '543': 10, '544': 20, '546': 30, '551': 10, '559': 15, '560': 5, '561': 5,
+    '562': 15, '564': 15, '569': 4, '570': 3, '575': 20, '577': 20, '579': 20, '594': 5,
+    '595': 5, '596': 5, '589E': 10, '598E': 10, '529E': 10, '538E': 10, '539E': 10,
+    '540E': 10, '585E': 10, '525E': 10, '811E': 10, '057': 5, '942E': 10, '943E': 10,
+    '944E': 10, '945E': 10, '948E': 10, '932E': 10, '933E': 10, '934E': 10, '935E': 10,
+    '936E': 10, '937E': 10, '583E': 15, '031': 10, '580E': 10,
+    '816E': 10, '584E': 20
+  };
 
   // Construye el estado inicial con el catálogo real precargado.
   function seedReal() {
@@ -755,12 +789,14 @@
     CATALOGO.forEach(function (row) {
       var codigo = row[0], nombre = row[1], totalCajas = row[2];
       var uxc = uxcSeed(codigo);    // unidades por caja (Uni×Caja)
+      var maxCajas = MAX_CAJAS[codigo];
       st.articulos.push({
         id: 'a_' + codigo, codigo: codigo, nombre: nombre, descripcion: '',
         foto: placeholder(nombre), precio: 0,
         stockInicial: STOCK_INICIAL[codigo] || 0, // stock real del cliente EN UNIDADES (Existencia, informe 23/06/26)
         totalHistorico: totalCajas * uxc, // ventas conocidas EN UNIDADES (el ranking viene EN CAJAS → × Uni×Caja)
         uxc: uxc,                     // unidades por caja (para mostrar en cajas / normalizar imports)
+        stockMaximo: (maxCajas != null) ? maxCajas * uxc : null, // nivel objetivo EN UNIDADES (máx. cajas × Uni×Caja)
         promedioManual: null,         // sin override: usa el promedio automático
         mesesPedido: null,            // sin override: usa meta.mesesPedidoDefault
         activo: true
@@ -788,6 +824,7 @@
     // historial (corrección puntual del punto de partida).
     var baselineNuevo = (state.meta.stockBaseline || 0) < STOCK_BASELINE;
     var aplicarInicial = baselineNuevo || !protegerInicial;
+    var uxcNuevo = (state.meta.uxcBaseline || 0) < UXC_BASELINE; // reaplica Uni×Caja autoritativa una vez
     var byCode = {};
     state.articulos.forEach(function (a) { if (a.codigo) byCode[a.codigo] = a; });
     fresh.articulos.forEach(function (na) {
@@ -795,14 +832,20 @@
       if (!ex) { state.articulos.push(na); return; } // artículo nuevo del catálogo
       ex.nombre = na.nombre;
       ex.totalHistorico = na.totalHistorico;
-      // Uni×Caja: setear si falta, o mejorar el default "desconocido" (1) cuando el
-      // seed ya la conoce. No pisa una Uni×Caja real ya cargada por un import (>1).
-      if (!ex.uxc || (ex.uxc === 1 && na.uxc > 1)) ex.uxc = na.uxc;
+      // Uni×Caja autoritativa (Cotizador Loekemeyer): al subir UXC_BASELINE se reaplica
+      // una vez a todos; si no, solo se setea cuando falta o está en el default 1.
+      // Después se respeta la que cargue un import.
+      if (uxcNuevo && na.uxc > 0) ex.uxc = na.uxc;
+      else if (!ex.uxc || (ex.uxc === 1 && na.uxc > 1)) ex.uxc = na.uxc;
+      // Stock máximo objetivo: se aplica el del seed solo la primera vez (cuando el
+      // artículo todavía no tiene el campo). Después se respeta lo que edite el usuario.
+      if (ex.stockMaximo === undefined) ex.stockMaximo = na.stockMaximo;
       if (ex.promedioManual === undefined) ex.promedioManual = null;
       if (ex.mesesPedido === undefined) ex.mesesPedido = null;
       if (aplicarInicial) ex.stockInicial = na.stockInicial;
     });
     state.meta.stockBaseline = STOCK_BASELINE;
+    state.meta.uxcBaseline = UXC_BASELINE;
     // Fusionar duplicados (ej. a_580 → a_580E): mover movimientos, sumar stock
     // inicial al canónico y eliminar el duplicado.
     FUSIONAR.forEach(function (par) {

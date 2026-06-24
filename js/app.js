@@ -23,7 +23,7 @@
   var VIEWS = {
     stocks:      { title: 'Stocks', sub: 'Stock de hoy y pedido sugerido por artículo' },
     movimientos: { title: 'Movimientos', sub: 'Inicial + entregas − ventas = stock hoy. Tocá un artículo para ver el detalle.' },
-    puntopedido: { title: 'Punto de pedido', sub: 'Promedio de ventas × meses de cobertura = punto de pedido' },
+    puntopedido: { title: 'Punto de pedido', sub: 'Máximo objetivo por artículo · pedido sugerido = máximo − stock actual' },
     entregas:    { title: 'Entregas Loeke', sub: 'Mercadería que Loeke entrega a OSA (entra al stock)' },
     ventas:      { title: 'Ventas OSA', sub: 'Ventas de OSA a sus clientes (salen del stock)' },
     cargas:      { title: 'Control de cargas', sub: 'Ventas de OSA por quincena: cargadas y pendientes' },
@@ -52,6 +52,8 @@
   function unidadCorta() { return unidadVista() === 'unidades' ? 'u' : 'cajas'; }
   function qN(cajas, art) { return S.enVista(cajas, art); }            // número en la unidad activa
   function qf(cajas, art) { return fmtInt(S.enVista(cajas, art)); }    // texto en la unidad activa
+  // Inverso de enVista: pasa un número escrito en la unidad activa a UNIDADES (canónico).
+  function aUni(v, art) { return unidadVista() === 'cajas' ? Math.round((v || 0) * S.uxcDe(art)) : Math.round(v || 0); }
   // Suma una lista de {cajas, art} en la unidad activa (los totales no se pueden
   // multiplicar por una constante porque la uxc varía por artículo).
   function qSum(items) { return items.reduce(function (acc, it) { return acc + S.enVista(it.cajas, it.art); }, 0); }
@@ -242,7 +244,7 @@
       '</div></div>';
 
     html += '<div class="card"><div class="table-wrap"><table class="table"><thead><tr>' +
-      '<th>Artículo</th><th class="num">Stock hoy <span class="muted">(' + unidadCorta() + ')</span></th><th class="num">Punto de pedido</th>' +
+      '<th>Artículo</th><th class="num">Stock hoy <span class="muted">(' + unidadCorta() + ')</span></th><th class="num">Máximo</th>' +
       '<th class="num">Sugerido</th><th>Estado</th></tr></thead><tbody>';
     arts.forEach(function (a) {
       var s = stocks[a.id];
@@ -254,7 +256,7 @@
         'data-search="' + esc((a.nombre + ' ' + (a.codigo || '')).toLowerCase()) + '" style="cursor:pointer;">' +
         '<td><div class="cell-art"><img src="' + fotoDe(a) + '" alt=""><div><div class="nm">' + esc(a.nombre) + '</div><div class="cd">' + esc(a.codigo || '') + '</div></div></div></td>' +
         '<td class="num"><strong>' + qf(s, a) + '</strong></td>' +
-        '<td class="num muted">' + qf(pp, a) + '</td>' +
+        '<td class="num muted">' + (a.stockMaximo != null ? qf(pp, a) : '—') + '</td>' +
         '<td class="num">' + (sg > 0 ? '<span class="badge badge--warn">+' + qf(sg, a) + '</span>' : '—') + '</td>' +
         '<td>' + badgeEstado(e) + '</td>' +
         '</tr>';
@@ -396,23 +398,13 @@
   function renderPunto() {
     var arts = S.getArticulos({ soloActivos: true });
     if (!arts.length) return emptyApp();
-    var m = S.getMeta();
 
-    var html = '<div class="grid-2">';
-    html += '<div class="card"><div class="card__head"><h2>Parámetros globales</h2></div><div class="card__body">' +
-      '<div class="form-grid">' +
-      field('Meses de cobertura por defecto', '<input class="input" id="pMeses" type="number" min="0" step="0.5" value="' + esc(m.mesesPedidoDefault) + '">') +
-      field('Meses del historial de ventas', '<input class="input" id="pPeriodo" type="number" min="1" step="1" value="' + esc(m.periodoMeses) + '">') +
-      '</div>' +
-      '<div class="hint"><strong>Punto de pedido</strong> = promedio de ventas mensual × meses de cobertura. ' +
-      'El promedio automático es <em>ventas conocidas ÷ meses del historial</em>. Podés sobrescribir el promedio o los meses por artículo en la tabla.</div>' +
-      '</div></div>';
-    html += '<div class="card"><div class="card__body" style="display:flex;align-items:center;">' +
+    var html = '<div class="card"><div class="card__body" style="display:flex;align-items:center;">' +
       '<div class="callout" style="margin:0;"><svg viewBox="0 0 24 24"><path d="M3 13h2v7H3zM10 8h2v12h-2zM17 4h2v16h-2z"/></svg>' +
-      '<div>Dejá un campo <strong>en blanco</strong> para usar el valor automático (promedio) o el global (meses). ' +
-      'Tocá <strong>Guardar</strong> arriba para aplicar los cambios.</div></div>' +
+      '<div>El <strong>máximo</strong> es la cantidad objetivo que querés tener de cada artículo. ' +
+      'El <strong>pedido sugerido</strong> = máximo − stock actual. Dejá el máximo <strong>en blanco</strong> ' +
+      'para que ese artículo no se reponga. Tocá <strong>Guardar</strong> arriba para aplicar.</div></div>' +
       '</div></div>';
-    html += '</div>';
 
     html += '<div class="toolbar" style="margin-top:18px;">' +
       '<div class="search"><svg viewBox="0 0 24 24"><path d="M21 20l-5.6-5.6a7 7 0 1 0-1.4 1.4L20 21zM4 10a5 5 0 1 1 10 0 5 5 0 0 1-10 0z"/></svg>' +
@@ -420,17 +412,22 @@
       '<span class="muted nowrap">' + arts.length + ' artículos</span></div>';
 
     var uc = unidadCorta();
+    var stocks = S.computeStocks();
     html += '<div class="card"><div class="table-wrap"><table class="table"><thead><tr>' +
-      '<th>Artículo</th><th class="num">Prom. auto <span class="muted">(' + uc + ')</span></th><th class="num">Promedio usado</th>' +
-      '<th class="num">Meses</th><th class="num">Punto de pedido <span class="muted">(' + uc + ')</span></th></tr></thead><tbody>';
+      '<th>Artículo</th><th class="num">Stock hoy <span class="muted">(' + uc + ')</span></th>' +
+      '<th class="num">Consumo/mes <span class="muted">(' + uc + ')</span></th>' +
+      '<th class="num">Máximo <span class="muted">(' + uc + ')</span></th>' +
+      '<th class="num">Sugerido <span class="muted">(' + uc + ')</span></th></tr></thead><tbody>';
     arts.forEach(function (a) {
-      var auto = S.promedioMensualAuto(a);
+      var stock = stocks[a.id];
+      var sg = S.sugerido(a, stock);
+      var maxView = (a.stockMaximo != null) ? qN(a.stockMaximo, a) : '';
       html += '<tr data-rowp="' + a.id + '" data-search="' + esc((a.nombre + ' ' + (a.codigo || '')).toLowerCase()) + '">' +
         '<td><div class="cell-art"><img src="' + fotoDe(a) + '" alt=""><div><div class="nm">' + esc(a.nombre) + '</div><div class="cd">' + esc(a.codigo || '') + '</div></div></div></td>' +
-        '<td class="num muted">' + qf(auto, a) + '</td>' +
-        '<td class="num"><input class="qty-input" type="number" min="0" step="0.5" value="' + (a.promedioManual != null ? a.promedioManual : '') + '" placeholder="' + qf(auto, a) + '" data-prom="' + a.id + '"></td>' +
-        '<td class="num"><input class="qty-input" type="number" min="0" step="0.5" value="' + (a.mesesPedido != null ? a.mesesPedido : '') + '" placeholder="' + esc(m.mesesPedidoDefault) + '" data-meses="' + a.id + '"></td>' +
-        '<td class="num" data-pp="' + a.id + '"><strong>' + qf(S.puntoPedido(a), a) + '</strong></td>' +
+        '<td class="num"><strong>' + qf(Math.max(0, stock), a) + '</strong></td>' +
+        '<td class="num muted">' + qf(S.promedioMensual(a), a) + '</td>' +
+        '<td class="num"><input class="qty-input" type="number" min="0" step="1" value="' + maxView + '" placeholder="—" data-max="' + a.id + '"></td>' +
+        '<td class="num" data-sug="' + a.id + '">' + (sg > 0 ? '<span class="badge badge--warn">+' + qf(sg, a) + '</span>' : '—') + '</td>' +
         '</tr>';
     });
     html += '</tbody></table></div></div>';
@@ -444,41 +441,25 @@
         tr.style.display = (!q || tr.getAttribute('data-search').indexOf(q) >= 0) ? '' : 'none';
       });
     });
-    // Vista previa del punto de pedido al editar (sin guardar)
+    // Vista previa del pedido sugerido al editar el máximo (sin guardar)
     function preview(id) {
       var a = S.getArticulo(id); if (!a) return;
-      var promI = $('[data-prom="' + id + '"]'), mesI = $('[data-meses="' + id + '"]');
-      var meta = S.getMeta();
-      var prom = promI.value === '' ? S.promedioMensualAuto(a) : (parseFloat(promI.value) || 0);
-      var mes = mesI.value === '' ? (meta.mesesPedidoDefault || 0) : (parseFloat(mesI.value) || 0);
-      var cell = $('[data-pp="' + id + '"]');
-      if (cell) cell.innerHTML = '<strong>' + qf(prom * mes, a) + '</strong>';
+      var inp = $('[data-max="' + id + '"]');
+      var stock = S.stockActual(id);
+      var maxU = inp.value === '' ? null : aUni(parseFloat(inp.value) || 0, a);
+      var sg = (maxU == null) ? 0 : Math.max(0, maxU - stock);
+      var cell = $('[data-sug="' + id + '"]');
+      if (cell) cell.innerHTML = sg > 0 ? '<span class="badge badge--warn">+' + qf(sg, a) + '</span>' : '—';
     }
-    $$('[data-prom]').forEach(function (i) { i.addEventListener('input', function () { preview(i.getAttribute('data-prom')); }); });
-    $$('[data-meses]').forEach(function (i) { i.addEventListener('input', function () { preview(i.getAttribute('data-meses')); }); });
-    var gM = $('#pMeses'), gP = $('#pPeriodo');
-    if (gM) gM.addEventListener('input', function () { $$('[data-prom]').forEach(function (i) { preview(i.getAttribute('data-prom')); }); });
-    if (gP) gP.addEventListener('input', function () { $$('[data-prom]').forEach(function (i) { preview(i.getAttribute('data-prom')); }); });
+    $$('[data-max]').forEach(function (i) { i.addEventListener('input', function () { preview(i.getAttribute('data-max')); }); });
   };
   function guardarPunto() {
-    var gM = $('#pMeses'), gP = $('#pPeriodo');
-    if (gM || gP) {
-      S.setMeta({
-        mesesPedidoDefault: Math.max(0, parseFloat(gM.value) || 0),
-        periodoMeses: Math.max(1, Math.round(parseFloat(gP.value) || 1))
-      });
-    }
-    var n = 0;
-    $$('[data-prom]').forEach(function (i) {
-      var id = i.getAttribute('data-prom');
-      var mesI = $('[data-meses="' + id + '"]');
-      S.updateArticulo(id, {
-        promedioManual: i.value === '' ? null : i.value,
-        mesesPedido: mesI && mesI.value === '' ? null : (mesI ? mesI.value : null)
-      });
-      n++;
+    $$('[data-max]').forEach(function (i) {
+      var id = i.getAttribute('data-max');
+      var a = S.getArticulo(id); if (!a) return;
+      S.updateArticulo(id, { stockMaximo: i.value === '' ? null : aUni(parseFloat(i.value) || 0, a) });
     });
-    toast('Punto de pedido actualizado', 'ok');
+    toast('Máximos actualizados', 'ok');
     render();
   }
 
@@ -844,7 +825,7 @@
       var e = S.estado(a, stock);
       resumen = '<div class="stats" style="margin-bottom:16px;">' +
         miniStat('Stock hoy (' + unidadCorta() + ')', e === 'sin' ? '0' : qf(stock, a)) +
-        miniStat('Punto de pedido', qf(S.puntoPedido(a), a)) +
+        miniStat('Máximo', a.stockMaximo != null ? qf(S.puntoPedido(a), a) : '—') +
         miniStat('Sugerido', qf(S.sugerido(a, stock), a)) +
         miniStat('Prom. mensual', qf(S.promedioMensual(a), a)) +
         '</div>';
@@ -863,11 +844,10 @@
       field('Código / SKU <span class="opt">(opcional)</span>', '<input class="input" id="fCodigo" value="' + esc(a ? a.codigo : '') + '" placeholder="Ej: 505">') +
       field('Stock inicial', '<input class="input" id="fInicial" type="number" min="0" step="1" value="' + (a ? a.stockInicial : 0) + '">') +
       field('Descripción <span class="opt">(opcional)</span>', '<textarea class="textarea" id="fDesc" placeholder="Detalle…">' + esc(a ? a.descripcion : '') + '</textarea>', true) +
-      field('Promedio mensual <span class="opt">(en blanco = auto)</span>', '<input class="input" id="fProm" type="number" min="0" step="0.5" value="' + (a && a.promedioManual != null ? a.promedioManual : '') + '" placeholder="' + (a ? fmtInt(S.promedioMensualAuto(a)) : '0') + '">') +
-      field('Meses de cobertura <span class="opt">(en blanco = global)</span>', '<input class="input" id="fMeses" type="number" min="0" step="0.5" value="' + (a && a.mesesPedido != null ? a.mesesPedido : '') + '" placeholder="' + esc(S.getMeta().mesesPedidoDefault) + '">') +
+      field('Máximo en ' + unidadCorta() + ' <span class="opt">(en blanco = no repone)</span>', '<input class="input" id="fMax" type="number" min="0" step="1" value="' + (a && a.stockMaximo != null ? qN(a.stockMaximo, a) : '') + '" placeholder="—">') +
       field('Precio unitario <span class="opt">(opcional)</span>', '<div class="input-prefix"><span>$</span><input class="input" id="fPrecio" type="number" min="0" step="0.01" value="' + (a ? a.precio : 0) + '"></div>') +
       '</div>' +
-      '<div class="hint">El <strong>punto de pedido</strong> se calcula como promedio mensual × meses de cobertura. Dejá los campos en blanco para usar el promedio automático y los meses globales.</div>' +
+      '<div class="hint">El <strong>pedido sugerido</strong> es <strong>máximo − stock</strong>. Dejá el máximo en blanco para que este artículo no se reponga.</div>' +
       '<div class="form-actions">' +
       (a ? '<button type="button" class="btn btn--ghost" id="fVerMov">Ver movimientos</button>' : '') +
       (a ? '<button type="button" class="btn btn--danger" id="fEliminar">Eliminar</button>' : '') +
@@ -899,8 +879,7 @@
       var data = {
         nombre: fNombre.value, codigo: $('#fCodigo').value, descripcion: $('#fDesc').value,
         foto: fFoto.value, precio: $('#fPrecio').value, stockInicial: $('#fInicial').value,
-        promedioManual: $('#fProm').value === '' ? null : $('#fProm').value,
-        mesesPedido: $('#fMeses').value === '' ? null : $('#fMeses').value
+        stockMaximo: $('#fMax').value === '' ? null : aUni(parseFloat($('#fMax').value) || 0, a)
       };
       if (!data.nombre.trim()) { toast('Poné un nombre al artículo', 'warn'); return; }
       if (a) { S.updateArticulo(a.id, data); toast('Artículo actualizado', 'ok'); }
@@ -936,7 +915,7 @@
       (meta.cliente ? '<div class="muted">Cliente: ' + esc(meta.cliente) + '</div>' : '') + '</div>' +
       '<div class="muted" style="text-align:right">Fecha: ' + fmtFecha(S.hoyISO()) + '</div></div>' +
       '<table><thead><tr><th>Código</th><th>Artículo</th><th style="text-align:right">Stock hoy</th>' +
-      '<th style="text-align:right">Punto</th><th style="text-align:right">A pedir</th></tr></thead>' +
+      '<th style="text-align:right">Máximo</th><th style="text-align:right">A pedir</th></tr></thead>' +
       '<tbody>' + rows + '</tbody></table>' +
       '<div class="tot">Total ' + unidadLbl() + ' a pedir: ' + fmtInt(totalU) + '</div>' +
       '<p class="muted" style="margin-top:40px;font-size:12px;">Generado con StockRotativo · ' + fmtFecha(S.hoyISO()) + '</p>' +
@@ -983,9 +962,9 @@
 
     html += '<div class="card" style="margin-top:18px;"><div class="card__head"><h2>¿Cómo funciona?</h2></div><div class="card__body">' +
       '<ol style="margin:0;padding-left:20px;line-height:1.9;color:var(--muted);">' +
-      '<li><strong style="color:var(--text)">Stocks</strong>: ves el stock de hoy, el punto de pedido y el pedido sugerido de cada artículo.</li>' +
+      '<li><strong style="color:var(--text)">Stocks</strong>: ves el stock de hoy, el máximo y el pedido sugerido de cada artículo.</li>' +
       '<li><strong style="color:var(--text)">Movimientos</strong>: inicial + entregas de Loeke − ventas de OSA = stock hoy. Tocá un artículo para ver su saldo.</li>' +
-      '<li><strong style="color:var(--text)">Punto de pedido</strong>: promedio de ventas × meses de cobertura. Lo ajustás global o por artículo.</li>' +
+      '<li><strong style="color:var(--text)">Punto de pedido</strong>: el máximo objetivo por artículo (en cajas). El pedido sugerido es máximo − stock.</li>' +
       '<li><strong style="color:var(--text)">Entregas Loeke</strong> y <strong style="color:var(--text)">Ventas OSA</strong>: cargás el movimiento y el stock se actualiza solo.</li>' +
       '</ol></div></div>';
 
