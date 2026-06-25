@@ -6,7 +6,7 @@
   'use strict';
 
   var S = window.Store;
-  var APP_VERSION = '1.4.1';
+  var APP_VERSION = '1.4.2';
   // ----- Integración Loekemeyer (envío del pedido sugerido) -----
   var SUPABASE_URL = 'https://kwkclwhmoygunqmlegrg.supabase.co';
   var SUPABASE_KEY = 'sb_publishable_mVX5MnjwM770cNjgiL6yLw_LDNl9pML'; // publishable: segura para el front
@@ -1058,24 +1058,26 @@
       setView('config'); return;
     }
     toast('Enviando pedido a Loekemeyer…', 'info');
-    // 1) N° de pedido del contador COMPARTIDO con la web (orders_id_seq, vía RPC).
-    //    Si la RPC falla queda null y el Apps Script cae a máx+1.
+    // 1) N° de pedido del contador COMPARTIDO con la web (orders_id_seq, vía RPC, CORS ok).
     obtenerNumeroPedido().then(function (numero) {
-      pedido.numero = numero;
-      // 2) Apps Script -> Sheet "Pedidos LK" (Content-Type text/plain = sin preflight CORS)
+      pedido.numero = numero; // si la RPC falla queda null y el Apps Script cae a máx+1
+      guardarEnSupabase(pedido, numero); // copia best-effort (Supabase REST tiene CORS)
+      // 2) Apps Script -> Sheet "Pedidos LK". El /exec NO expone cabeceras CORS legibles,
+      //    así que va en no-cors (mandar y listo); el N° ya lo tenemos del contador.
       return fetch(url, {
         method: 'POST',
+        mode: 'no-cors',
         headers: { 'Content-Type': 'text/plain;charset=utf-8' },
         body: JSON.stringify(pedido)
-      }).then(function (r) { return r.json(); });
+      });
     })
-      .then(function (res) {
-        if (!res || !res.ok) throw new Error(res && res.error ? res.error : 'respuesta inválida del Sheet');
-        guardarEnSupabase(pedido, res.numeroPedido); // best-effort, no bloquea
-        toast('Pedido N° ' + res.numeroPedido + ' enviado (' + pedido.items.length + ' artículos)', 'ok');
+      .then(function () {
+        toast(pedido.numero
+          ? ('Pedido N° ' + pedido.numero + ' enviado (' + pedido.items.length + ' artículos)')
+          : ('Pedido enviado (' + pedido.items.length + ' artículos)'), 'ok');
       })
       .catch(function (err) {
-        toast('No se pudo enviar: ' + err.message, 'warn');
+        toast('No se pudo enviar: ' + (err && err.message ? err.message : err), 'warn');
       });
   }
 
