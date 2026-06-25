@@ -5,9 +5,9 @@
  * El N° Pedido lo manda la app (contador COMPARTIDO con la web: orders_id_seq, así
  * nunca colisiona). Si no viniera, se cae a máx+1 sobre la planilla (con LockService).
  *
- * Columnas que escribe (A..I); J..P quedan vacías:
+ * Columnas que escribe: A..I + P='OSA' (marca el origen). J..O quedan vacías:
  *   A Fecha · B N° Pedido · C Cliente · D Vend · E Cod Art · F Cajas ·
- *   G Uni Pedidas · H Sucursal de Entrega · I Condición de Pago
+ *   G Uni Pedidas · H Sucursal de Entrega · I Condición de Pago · P Formato='OSA'
  *
  * --------------------------- CÓMO DEPLOYARLO ---------------------------
  * IMPORTANTE: NO lo pegues en el Apps Script del propio Sheet (eso pisaría la
@@ -55,8 +55,8 @@ function doPost(e) {
 
     var filas = items.map(function (it) {
       var codArt = "'" + String(it.cod || '').trim(); // apostrofe = forzar texto (igual que la via web)
-      // A          B       C               D            E       F         G             H                 I                    J..P
-      return [fecha, numero, pedido.cliente, pedido.vend, codArt, it.cajas, it.unidades, pedido.sucursal, pedido.condicionPago, '', '', '', '', '', '', ''];
+      // A          B       C               D            E       F         G             H                 I                    J  K   L   M   N   O   P='OSA'
+      return [fecha, numero, pedido.cliente, pedido.vend, codArt, it.cajas, it.unidades, pedido.sucursal, pedido.condicionPago, '', '', '', '', '', '', 'OSA'];
     });
 
     hoja.getRange(hoja.getLastRow() + 1, 1, filas.length, filas[0].length).setValues(filas);
