@@ -6,10 +6,13 @@
   'use strict';
 
   var S = window.Store;
-  var APP_VERSION = '1.3.2';
+  var APP_VERSION = '1.3.3';
   // ----- Integración Loekemeyer (envío del pedido sugerido) -----
   var SUPABASE_URL = 'https://kwkclwhmoygunqmlegrg.supabase.co';
   var SUPABASE_KEY = 'sb_publishable_mVX5MnjwM770cNjgiL6yLw_LDNl9pML'; // publishable: segura para el front
+  // URL del Apps Script (Web App) que escribe en el Sheet "Pedidos LK". Precargada;
+  // se puede sobrescribir desde Configuración → Integración Loekemeyer.
+  var APPS_SCRIPT_URL = 'https://script.google.com/macros/s/AKfycbyVafQeHdk-W-CnzWH_AZPZzbfMM2CI7PaCFdNQtdWJXY99WFMxIrtI6LAQ1zSf7FVM/exec';
   var LK_CLIENTE = 2533;   // código de OSA en el sistema de Loekemeyer (col C)
   var LK_VEND = 7;         // vendedor (col D)
   var LK_COND_PAGO = 18;   // condición de pago (col I)
@@ -982,7 +985,8 @@
     var pedido = buildPedidoLK();
     if (!pedido.items.length) { toast('No hay nada para reponer', 'info'); return; }
     var m = S.getMeta();
-    if (!m.appsScriptUrl) {
+    var url = m.appsScriptUrl || APPS_SCRIPT_URL; // default precargado; Config lo puede sobrescribir
+    if (!url) {
       toast('Falta la URL del Apps Script (Configuración → Integración Loekemeyer)', 'warn');
       setView('config'); return;
     }
@@ -992,7 +996,7 @@
     obtenerNumeroPedido().then(function (numero) {
       pedido.numero = numero;
       // 2) Apps Script -> Sheet "Pedidos LK" (Content-Type text/plain = sin preflight CORS)
-      return fetch(m.appsScriptUrl, {
+      return fetch(url, {
         method: 'POST',
         headers: { 'Content-Type': 'text/plain;charset=utf-8' },
         body: JSON.stringify(pedido)
@@ -1079,7 +1083,7 @@
     html += '<div class="card" style="margin-top:18px;"><div class="card__head"><h2>Integración Loekemeyer (envío del pedido)</h2></div><div class="card__body">' +
       '<form class="form" id="lkForm">' +
       field('URL del Apps Script (Web App …/exec)', '<input class="input" id="cAppsScript" value="' + esc(m.appsScriptUrl || '') + '" placeholder="https://script.google.com/macros/s/AKfy…/exec">') +
-      '<div class="hint">El botón <strong>«Enviar a Loekemeyer»</strong> (en Stocks) manda el pedido sugerido a la planilla «Pedidos LK» —el N° de pedido se asigna solo— y guarda una copia en Supabase. La <strong>sucursal de entrega</strong> se elige arriba, en la pantalla de Stocks. Pegá acá la URL del Apps Script una vez deployado.</div>' +
+      '<div class="hint">El botón <strong>«Enviar a Loekemeyer»</strong> (en Stocks) manda el pedido sugerido a la planilla «Pedidos LK» —el N° de pedido se asigna solo— y guarda una copia en Supabase. La <strong>sucursal de entrega</strong> se elige arriba, en la pantalla de Stocks. La URL del Apps Script ya viene <strong>precargada</strong>; solo cambiala acá si redeployás con otra.</div>' +
       '<div class="form-actions"><button type="submit" class="btn btn--primary">Guardar integración</button></div>' +
       '</form></div></div>';
 
