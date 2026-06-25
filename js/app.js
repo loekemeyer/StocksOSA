@@ -6,7 +6,7 @@
   'use strict';
 
   var S = window.Store;
-  var APP_VERSION = '1.4.0';
+  var APP_VERSION = '1.4.1';
   // ----- Integración Loekemeyer (envío del pedido sugerido) -----
   var SUPABASE_URL = 'https://kwkclwhmoygunqmlegrg.supabase.co';
   var SUPABASE_KEY = 'sb_publishable_mVX5MnjwM770cNjgiL6yLw_LDNl9pML'; // publishable: segura para el front
@@ -968,7 +968,12 @@
   function itemsSugeridosLK() {
     return S.pedidoSugerido().map(function (x) {
       var a = x.articulo, f = S.uxcDe(a);
-      return { cod: a.codigo || '', nombre: a.nombre, uxc: f, cajas: Math.round(x.sugerido / f) };
+      return {
+        cod: a.codigo || '', nombre: a.nombre, uxc: f,
+        cajas: Math.round(x.sugerido / f),
+        stockCajas: Math.round((x.stock || 0) / f),  // stock actual en cajas
+        maxCajas: Math.round((x.punto || 0) / f)      // máximo objetivo en cajas
+      };
     }).filter(function (it) { return it.cajas > 0; });
   }
 
@@ -996,17 +1001,20 @@
     var rows = items.map(function (it, i) {
       return '<div class="pedrow">' +
         '<div class="pedrow__info"><span class="pedrow__cod">' + esc(it.cod) + '</span>' +
-        '<span class="pedrow__name">' + esc(it.nombre) + '</span></div>' +
+        '<span class="pedrow__name">' + esc(it.nombre) + '</span>' +
+        '<span class="pedrow__meta">Stock <strong>' + it.stockCajas + '</strong> · Máx <strong>' + it.maxCajas + '</strong> cajas</span></div>' +
         '<div class="stepper">' +
           '<button type="button" class="stepper__btn" data-step="-1" data-i="' + i + '">−</button>' +
           '<input class="stepper__inp" type="number" min="0" step="1" inputmode="numeric" value="' + it.cajas + '" data-i="' + i + '" aria-label="Cajas de ' + esc(it.cod) + '">' +
           '<button type="button" class="stepper__btn" data-step="1" data-i="' + i + '">+</button>' +
-        '</div></div>';
+        '</div>' +
+        '<button type="button" class="pedrow__del" data-i="' + i + '" title="Sacar del pedido" aria-label="Sacar ' + esc(it.cod) + '">×</button>' +
+        '</div>';
     }).join('');
     var totIni = items.reduce(function (s, it) { return s + it.cajas; }, 0);
     var body = '<div class="pedlist">' + rows + '</div>' +
       '<div class="pedtot">Total: <strong id="pedTotal">' + totIni + '</strong> cajas</div>' +
-      '<div class="hint">Ajustá las cajas de cada artículo (poné 0 para sacarlo). Las unidades se calculan solas. Sucursal: <strong>' + esc(S.getMeta().sucursalLK || LK_SUCURSALES[0].val) + '</strong>.</div>' +
+      '<div class="hint">Ajustá las cajas con − / + (o tocá la <strong>✕</strong> para sacar el artículo). Las unidades se calculan solas. Sucursal: <strong>' + esc(S.getMeta().sucursalLK || LK_SUCURSALES[0].val) + '</strong>.</div>' +
       '<div class="form-actions"><button type="button" class="btn btn--ghost" data-close>Cancelar</button>' +
       '<button type="button" class="btn btn--primary" id="pedConfirm">Confirmar y enviar</button></div>';
     openModal('Revisar pedido a Loekemeyer', body);
@@ -1018,6 +1026,8 @@
       document.getElementById('pedTotal').textContent = t;
     }
     list.addEventListener('click', function (e) {
+      var del = e.target.closest('.pedrow__del');
+      if (del) { var row = del.closest('.pedrow'); if (row) row.parentNode.removeChild(row); recalc(); return; }
       var b = e.target.closest('.stepper__btn');
       if (!b) return;
       var inp = list.querySelector('.stepper__inp[data-i="' + b.getAttribute('data-i') + '"]');
@@ -1030,7 +1040,7 @@
     document.getElementById('pedConfirm').addEventListener('click', function () {
       var edit = items.map(function (it, i) {
         var inp = list.querySelector('.stepper__inp[data-i="' + i + '"]');
-        return { cod: it.cod, nombre: it.nombre, uxc: it.uxc, cajas: Math.max(0, parseInt(inp.value, 10) || 0) };
+        return { cod: it.cod, nombre: it.nombre, uxc: it.uxc, cajas: inp ? Math.max(0, parseInt(inp.value, 10) || 0) : 0 };
       }).filter(function (it) { return it.cajas > 0; });
       if (!edit.length) { toast('Poné cantidad en al menos un artículo', 'warn'); return; }
       closeModal();
