@@ -43,18 +43,12 @@ unidades por caja. En cualquier caso el stock se registra correctamente en unida
 
 ## 🖥️ Usarla
 
-### Online (GitHub Pages)
-Se publica gratis desde este repositorio. **Activación única** (una sola vez):
+### Online (Netlify)
+La app está publicada en **Netlify**, conectada a este repositorio: **cada push a `main` se publica solo** en ~1 minuto.
 
-1. Entrá a **Settings → Pages** del repositorio.
-2. En **Build and deployment → Source**, elegí **Deploy from a branch**.
-3. **Branch:** `main`, **carpeta:** `/ (root)` → **Save**.
+> **https://stocksosalk.netlify.app/**
 
-En 1–2 minutos queda online en:
-
-> **https://loekemeyer.github.io/StocksOSA/**
-
-A partir de ahí, cada push a `main` se publica solo.
+> _Alternativa:_ también puede servirse por GitHub Pages (Settings → Pages → Deploy from a branch → `main` / `root`), quedando en https://loekemeyer.github.io/StocksOSA/.
 
 ### En tu computadora
 No necesita instalación. Opciones:
