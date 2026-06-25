@@ -6,7 +6,7 @@
   'use strict';
 
   var S = window.Store;
-  var APP_VERSION = '1.3.3';
+  var APP_VERSION = '1.4.0';
   // ----- Integración Loekemeyer (envío del pedido sugerido) -----
   var SUPABASE_URL = 'https://kwkclwhmoygunqmlegrg.supabase.co';
   var SUPABASE_KEY = 'sb_publishable_mVX5MnjwM770cNjgiL6yLw_LDNl9pML'; // publishable: segura para el front
@@ -958,31 +958,88 @@
   }
 
   /* ---------- Enviar pedido a Loekemeyer (Google Sheet + Supabase) ----------
-     El pedido a proveedor va SIEMPRE en cajas cerradas. Una línea por artículo
-     (cod, cajas, unidades) con cabecera fija de OSA. Se manda a:
-       1) el Apps Script del Sheet "Pedidos LK" (asigna N° Pedido = máx+1)
-       2) la tabla aislada osa_reposicion en Supabase (copia/histórico). */
-  function buildPedidoLK() {
-    var sug = S.pedidoSugerido();
-    var m = S.getMeta();
-    var items = sug.map(function (x) {
+     Flujo: el botón abre un POP-UP donde el usuario revisa/ajusta las cajas de
+     cada artículo (+/−); al confirmar se manda. El pedido va SIEMPRE en cajas
+     cerradas (las unidades = cajas × Uni×Caja). Destinos:
+       1) Apps Script del Sheet "Pedidos LK" (N° Pedido del contador compartido)
+       2) tabla aislada osa_reposicion en Supabase (copia/histórico). */
+
+  // Items sugeridos (en cajas cerradas) listos para revisar/editar.
+  function itemsSugeridosLK() {
+    return S.pedidoSugerido().map(function (x) {
       var a = x.articulo, f = S.uxcDe(a);
-      var cajas = Math.round(x.sugerido / f); // sugerido ya es múltiplo de la caja
-      return { cod: a.codigo || '', nombre: a.nombre, cajas: cajas, unidades: cajas * f };
+      return { cod: a.codigo || '', nombre: a.nombre, uxc: f, cajas: Math.round(x.sugerido / f) };
     }).filter(function (it) { return it.cajas > 0; });
-    var totalCajas = items.reduce(function (s, it) { return s + it.cajas; }, 0);
-    var totalUni = items.reduce(function (s, it) { return s + it.unidades; }, 0);
+  }
+
+  // Arma el payload del pedido a partir de una lista de items {cod,nombre,uxc,cajas}.
+  function pedidoDesdeItems(items) {
+    var m = S.getMeta();
+    var lim = items.filter(function (it) { return it.cajas > 0; }).map(function (it) {
+      return { cod: it.cod, nombre: it.nombre, cajas: it.cajas, unidades: it.cajas * it.uxc };
+    });
     var iso = S.hoyISO().split('-'); // yyyy-mm-dd -> dd/MM/yyyy (formato del Sheet)
     return {
       fecha: iso[2] + '/' + iso[1] + '/' + iso[0],
       cliente: LK_CLIENTE, vend: LK_VEND, condicionPago: LK_COND_PAGO,
       sucursal: m.sucursalLK || LK_SUCURSALES[0].val,
-      items: items, totalCajas: totalCajas, totalUnidades: totalUni
+      items: lim,
+      totalCajas: lim.reduce(function (s, it) { return s + it.cajas; }, 0),
+      totalUnidades: lim.reduce(function (s, it) { return s + it.unidades; }, 0)
     };
   }
 
+  // Paso 1: pop-up para revisar/ajustar las cajas antes de enviar.
   function enviarLoeke() {
-    var pedido = buildPedidoLK();
+    var items = itemsSugeridosLK();
+    if (!items.length) { toast('No hay nada para reponer', 'info'); return; }
+    var rows = items.map(function (it, i) {
+      return '<div class="pedrow">' +
+        '<div class="pedrow__info"><span class="pedrow__cod">' + esc(it.cod) + '</span>' +
+        '<span class="pedrow__name">' + esc(it.nombre) + '</span></div>' +
+        '<div class="stepper">' +
+          '<button type="button" class="stepper__btn" data-step="-1" data-i="' + i + '">−</button>' +
+          '<input class="stepper__inp" type="number" min="0" step="1" inputmode="numeric" value="' + it.cajas + '" data-i="' + i + '" aria-label="Cajas de ' + esc(it.cod) + '">' +
+          '<button type="button" class="stepper__btn" data-step="1" data-i="' + i + '">+</button>' +
+        '</div></div>';
+    }).join('');
+    var totIni = items.reduce(function (s, it) { return s + it.cajas; }, 0);
+    var body = '<div class="pedlist">' + rows + '</div>' +
+      '<div class="pedtot">Total: <strong id="pedTotal">' + totIni + '</strong> cajas</div>' +
+      '<div class="hint">Ajustá las cajas de cada artículo (poné 0 para sacarlo). Las unidades se calculan solas. Sucursal: <strong>' + esc(S.getMeta().sucursalLK || LK_SUCURSALES[0].val) + '</strong>.</div>' +
+      '<div class="form-actions"><button type="button" class="btn btn--ghost" data-close>Cancelar</button>' +
+      '<button type="button" class="btn btn--primary" id="pedConfirm">Confirmar y enviar</button></div>';
+    openModal('Revisar pedido a Loekemeyer', body);
+
+    var list = document.getElementById('modalBody').querySelector('.pedlist');
+    function recalc() {
+      var t = 0;
+      list.querySelectorAll('.stepper__inp').forEach(function (inp) { t += Math.max(0, parseInt(inp.value, 10) || 0); });
+      document.getElementById('pedTotal').textContent = t;
+    }
+    list.addEventListener('click', function (e) {
+      var b = e.target.closest('.stepper__btn');
+      if (!b) return;
+      var inp = list.querySelector('.stepper__inp[data-i="' + b.getAttribute('data-i') + '"]');
+      inp.value = Math.max(0, (parseInt(inp.value, 10) || 0) + parseInt(b.getAttribute('data-step'), 10));
+      recalc();
+    });
+    list.addEventListener('input', function (e) {
+      if (e.target.classList.contains('stepper__inp')) recalc();
+    });
+    document.getElementById('pedConfirm').addEventListener('click', function () {
+      var edit = items.map(function (it, i) {
+        var inp = list.querySelector('.stepper__inp[data-i="' + i + '"]');
+        return { cod: it.cod, nombre: it.nombre, uxc: it.uxc, cajas: Math.max(0, parseInt(inp.value, 10) || 0) };
+      }).filter(function (it) { return it.cajas > 0; });
+      if (!edit.length) { toast('Poné cantidad en al menos un artículo', 'warn'); return; }
+      closeModal();
+      confirmarEnvioLoeke(pedidoDesdeItems(edit));
+    });
+  }
+
+  // Paso 2: manda el pedido ya revisado al Sheet + Supabase.
+  function confirmarEnvioLoeke(pedido) {
     if (!pedido.items.length) { toast('No hay nada para reponer', 'info'); return; }
     var m = S.getMeta();
     var url = m.appsScriptUrl || APPS_SCRIPT_URL; // default precargado; Config lo puede sobrescribir
